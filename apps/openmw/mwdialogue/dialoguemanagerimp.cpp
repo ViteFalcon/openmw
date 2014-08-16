@@ -2,27 +2,13 @@
 #include "dialoguemanagerimp.hpp"
 
 #include <cctype>
+#include <cstdlib>
 #include <algorithm>
 #include <iterator>
 
 #include <components/esm/loaddial.hpp>
-
-#include <components/esm_store/store.hpp>
-
-#include "../mwbase/environment.hpp"
-#include "../mwbase/world.hpp"
-#include "../mwbase/scriptmanager.hpp"
-#include "../mwbase/journal.hpp"
-#include "../mwbase/windowmanager.hpp"
-
-#include "../mwworld/class.hpp"
-#include "../mwworld/refdata.hpp"
-#include "../mwworld/player.hpp"
-#include "../mwworld/containerstore.hpp"
-
-#include "../mwgui/dialogue.hpp"
-
-#include <iostream>
+#include <components/esm/loadinfo.hpp>
+#include <components/esm/dialoguestate.hpp>
 
 #include <components/compiler/exception.hpp>
 #include <components/compiler/errorhandler.hpp>
@@ -30,644 +16,166 @@
 #include <components/compiler/locals.hpp>
 #include <components/compiler/output.hpp>
 #include <components/compiler/scriptparser.hpp>
+
 #include <components/interpreter/interpreter.hpp>
+#include <components/interpreter/defines.hpp>
+
+#include "../mwbase/environment.hpp"
+#include "../mwbase/world.hpp"
+#include "../mwbase/journal.hpp"
+#include "../mwbase/scriptmanager.hpp"
+#include "../mwbase/windowmanager.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
+#include "../mwbase/soundmanager.hpp"
+
+#include "../mwworld/class.hpp"
+#include "../mwworld/containerstore.hpp"
+#include "../mwworld/esmstore.hpp"
+
+#include "../mwgui/dialogue.hpp"
 
 #include "../mwscript/compilercontext.hpp"
 #include "../mwscript/interpretercontext.hpp"
 #include "../mwscript/extensions.hpp"
 
-#include "../mwclass/npc.hpp"
+#include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/npcstats.hpp"
 
-namespace
-{
-    std::string toLower (const std::string& name)
-    {
-        std::string lowerCase;
-
-        std::transform (name.begin(), name.end(), std::back_inserter (lowerCase),
-            (int(*)(int)) std::tolower);
-
-        return lowerCase;
-    }
-
-    bool stringCompareNoCase (std::string first, std::string second)
-    {
-        unsigned int i=0;
-        while ( (i<first.length()) && (i<second.length()) )
-        {
-            if (tolower(first[i])<tolower(second[i])) return true;
-            else if (tolower(first[i])>tolower(second[i])) return false;
-            ++i;
-        }
-        if (first.length()<second.length())
-            return true;
-        else
-            return false;
-    }
-
-    template<typename T1, typename T2>
-    bool selectCompare (char comp, T1 value1, T2 value2)
-    {
-        switch (comp)
-        {
-        case '0': return value1==value2;
-        case '1': return value1!=value2;
-        case '2': return value1>value2;
-        case '3': return value1>=value2;
-        case '4': return value1<value2;
-        case '5': return value1<=value2;
-        }
-
-        throw std::runtime_error ("unknown compare type in dialogue info select");
-    }
-
-    template<typename T>
-    bool checkLocal (char comp, const std::string& name, T value, const MWWorld::Ptr& actor,
-        const ESMS::ESMStore& store)
-    {
-        std::string scriptName = MWWorld::Class::get (actor).getScript (actor);
-
-        if (scriptName.empty())
-            return false; // no script
-
-        const ESM::Script *script = store.scripts.find (scriptName);
-
-        int i = 0;
-
-        for (; i<static_cast<int> (script->varNames.size()); ++i)
-            if (script->varNames[i]==name)
-                break;
-
-        if (i>=static_cast<int> (script->varNames.size()))
-            return false; // script does not have a variable of this name
-
-        const MWScript::Locals& locals = actor.getRefData().getLocals();
-
-        if (i<script->data.numShorts)
-            return selectCompare (comp, locals.mShorts[i], value);
-        else
-            i -= script->data.numShorts;
-
-        if (i<script->data.numLongs)
-            return selectCompare (comp, locals.mLongs[i], value);
-        else
-            i -= script->data.numShorts;
-
-        return selectCompare (comp, locals.mFloats.at (i), value);
-    }
-
-    template<typename T>
-    bool checkGlobal (char comp, const std::string& name, T value)
-    {
-        switch (MWBase::Environment::get().getWorld()->getGlobalVariableType (name))
-        {
-        case 's':
-            return selectCompare (comp, MWBase::Environment::get().getWorld()->getGlobalVariable (name).mShort, value);
-
-        case 'l':
-
-            return selectCompare (comp, MWBase::Environment::get().getWorld()->getGlobalVariable (name).mLong, value);
-
-        case 'f':
-
-            return selectCompare (comp, MWBase::Environment::get().getWorld()->getGlobalVariable (name).mFloat, value);
-
-        case ' ':
-
-            MWBase::Environment::get().getWorld()->getGlobalVariable (name); // trigger exception
-            break;
-
-        default:
-
-            throw std::runtime_error ("unsupported gobal variable type");
-        }
-
-        return false;
-    }
-}
+#include "filter.hpp"
 
 namespace MWDialogue
 {
-
-    //helper function
-    std::string::size_type find_str_ci(const std::string& str, const std::string& substr,size_t pos)
-    {
-        return toLower(str).find(toLower(substr),pos);
-    }
-
-    bool DialogueManager::functionFilter(const MWWorld::Ptr& actor, const ESM::DialInfo& info,bool choice)
-    {
-        bool isCreature = (actor.getTypeName() != typeid(ESM::NPC).name());
-
-        for (std::vector<ESM::DialInfo::SelectStruct>::const_iterator iter (info.selects.begin());
-            iter != info.selects.end(); ++iter)
-        {
-            ESM::DialInfo::SelectStruct select = *iter;
-            char type = select.selectRule[1];
-            if(type == '1')
-            {
-                char comp = select.selectRule[4];
-                std::string name = select.selectRule.substr (5);
-                std::string function = select.selectRule.substr(2,2);
-
-                int ifunction;
-                std::istringstream iss(function);
-                iss >> ifunction;
-                switch(ifunction)
-                {
-                case 39://PC Expelled
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 40://PC Common Disease
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 41://PC Blight Disease
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 43://PC Crime level
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 46://Same faction
-                    {
-                    if (isCreature)
-                        return false;
-
-                    MWMechanics::NpcStats PCstats = MWWorld::Class::get(MWBase::Environment::get().getWorld()->getPlayer().getPlayer()).getNpcStats(MWBase::Environment::get().getWorld()->getPlayer().getPlayer());
-                    MWMechanics::NpcStats NPCstats = MWWorld::Class::get(actor).getNpcStats(actor);
-                    int sameFaction = 0;
-                    if(!NPCstats.getFactionRanks().empty())
-                    {
-                        std::string NPCFaction = NPCstats.getFactionRanks().begin()->first;
-                        if(PCstats.getFactionRanks().find(toLower(NPCFaction)) != PCstats.getFactionRanks().end()) sameFaction = 1;
-                    }
-                    if(!selectCompare<int,int>(comp,sameFaction,select.i)) return false;
-                    }
-                    break;
-
-                case 48://Detected
-                    if(!selectCompare<int,int>(comp,1,select.i)) return false;
-                    break;
-
-                case 49://Alarmed
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 50://choice
-                    if(choice)
-                    {
-                        if(!selectCompare<int,int>(comp,mChoice,select.i)) return false;
-                    }
-                    break;
-
-                case 60://PC Vampire
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 61://Level
-                    if(!selectCompare<int,int>(comp,1,select.i)) return false;
-                    break;
-
-                case 62://Attacked
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 63://Talked to PC
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 64://PC Health
-                    if(!selectCompare<int,int>(comp,50,select.i)) return false;
-                    break;
-
-                case 65://Creature target
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 66://Friend hit
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 67://Fight
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 68://Hello????
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 69://Alarm
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 70://Flee
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                case 71://Should Attack
-                    if(!selectCompare<int,int>(comp,0,select.i)) return false;
-                    break;
-
-                default:
-                    break;
-
-                }
-            }
-        }
-
-        return true;
-    }
-
-    bool DialogueManager::isMatching (const MWWorld::Ptr& actor,
-        const ESM::DialInfo::SelectStruct& select) const
-    {
-        bool isCreature = (actor.getTypeName() != typeid(ESM::NPC).name());
-
-        char type = select.selectRule[1];
-
-        if (type!='0')
-        {
-            char comp = select.selectRule[4];
-            std::string name = select.selectRule.substr (5);
-            std::string function = select.selectRule.substr(1,2);
-
-            switch (type)
-            {
-            case '1': // function
-
-                return true; // Done elsewhere.
-
-            case '2': // global
-
-                if (select.type==ESM::VT_Short || select.type==ESM::VT_Int ||
-                    select.type==ESM::VT_Long)
-                {
-                    if (!checkGlobal (comp, toLower (name), select.i))
-                        return false;
-                }
-                else if (select.type==ESM::VT_Float)
-                {
-                    if (!checkGlobal (comp, toLower (name), select.f))
-                        return false;
-                }
-                else
-                    throw std::runtime_error (
-                    "unsupported variable type in dialogue info select");
-
-                return true;
-
-            case '3': // local
-
-                if (select.type==ESM::VT_Short || select.type==ESM::VT_Int ||
-                    select.type==ESM::VT_Long)
-                {
-                    if (!checkLocal (comp, toLower (name), select.i, actor,
-                        MWBase::Environment::get().getWorld()->getStore()))
-                        return false;
-                }
-                else if (select.type==ESM::VT_Float)
-                {
-                    if (!checkLocal (comp, toLower (name), select.f, actor,
-                        MWBase::Environment::get().getWorld()->getStore()))
-                        return false;
-                }
-                else
-                    throw std::runtime_error (
-                    "unsupported variable type in dialogue info select");
-
-                return true;
-
-            case '4'://journal
-                if(select.type==ESM::VT_Int)
-                {
-                    if(!selectCompare<int,int>(comp,MWBase::Environment::get().getJournal()->getJournalIndex(toLower(name)),select.i)) return false;
-                }
-                else
-                    throw std::runtime_error (
-                    "unsupported variable type in dialogue info select");
-
-                return true;
-
-            case '5'://item
-                {
-                MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayer().getPlayer();
-                MWWorld::ContainerStore& store = MWWorld::Class::get (player).getContainerStore (player);
-
-                int sum = 0;
-
-                for (MWWorld::ContainerStoreIterator iter (store.begin()); iter!=store.end(); ++iter)
-                    if (toLower(iter->getCellRef().refID) == toLower(name))
-                        sum += iter->getRefData().getCount();
-                if(!selectCompare<int,int>(comp,sum,select.i)) return false;
-                }
-
-                return true;
-
-
-            case '6'://dead
-                if(!selectCompare<int,int>(comp,0,select.i)) return false;
-
-            case '7':// not ID
-                if(select.type==ESM::VT_String ||select.type==ESM::VT_Int)//bug in morrowind here? it's not a short, it's a string
-                {
-                    int isID = int(toLower(name)==toLower(MWWorld::Class::get (actor).getId (actor)));
-                    if (selectCompare<int,int>(comp,!isID,select.i)) return false;
-                }
-                else
-                    throw std::runtime_error (
-                    "unsupported variable type in dialogue info select");
-
-                return true;
-
-            case '8':// not faction
-                if (isCreature)
-                    return false;
-
-                if(select.type==ESM::VT_Int)
-                {
-                    MWWorld::LiveCellRef<ESM::NPC>* npc = actor.get<ESM::NPC>();
-                    int isFaction = int(toLower(npc->base->faction) == toLower(name));
-                    if(selectCompare<int,int>(comp,!isFaction,select.i))
-                        return false;
-                }
-                else
-                    throw std::runtime_error (
-                    "unsupported variable type in dialogue info select");
-
-                return true;
-
-            case '9':// not class
-                if (isCreature)
-                    return false;
-
-                if(select.type==ESM::VT_Int)
-                {
-                    MWWorld::LiveCellRef<ESM::NPC>* npc = actor.get<ESM::NPC>();
-                    int isClass = int(toLower(npc->base->cls) == toLower(name));
-                    if(selectCompare<int,int>(comp,!isClass,select.i))
-                        return false;
-                }
-                else
-                    throw std::runtime_error (
-                    "unsupported variable type in dialogue info select");
-
-                return true;
-
-            case 'A'://not Race
-                if (isCreature)
-                    return false;
-
-                if(select.type==ESM::VT_Int)
-                {
-                    MWWorld::LiveCellRef<ESM::NPC>* npc = actor.get<ESM::NPC>();
-                    int isRace = int(toLower(npc->base->race) == toLower(name));
-                    if(selectCompare<int,int>(comp,!isRace,select.i))
-                        return false;
-                }
-                else
-                    throw std::runtime_error (
-                    "unsupported variable type in dialogue info select");
-
-                return true;
-
-            case 'B'://not Cell
-                if(select.type==ESM::VT_Int)
-                {
-                    int isCell = int(toLower(actor.getCell()->cell->name) == toLower(name));
-                    if(selectCompare<int,int>(comp,!isCell,select.i))
-                        return false;
-                }
-                else
-                    throw std::runtime_error (
-                    "unsupported variable type in dialogue info select");
-                return true;
-
-            case 'C'://not local
-                if (select.type==ESM::VT_Short || select.type==ESM::VT_Int ||
-                    select.type==ESM::VT_Long)
-                {
-                    if (checkLocal (comp, toLower (name), select.i, actor,
-                        MWBase::Environment::get().getWorld()->getStore()))
-                        return false;
-                }
-                else if (select.type==ESM::VT_Float)
-                {
-                    if (checkLocal (comp, toLower (name), select.f, actor,
-                        MWBase::Environment::get().getWorld()->getStore()))
-                        return false;
-                }
-                else
-                    throw std::runtime_error (
-                    "unsupported variable type in dialogue info select");
-                return true;
-
-
-            default:
-
-                std::cout << "unchecked select: " << type << " " << comp << " " << name << std::endl;
-            }
-        }
-
-        return true;
-    }
-
-    bool DialogueManager::isMatching (const MWWorld::Ptr& actor, const ESM::DialInfo& info) const
-    {
-        bool isCreature = (actor.getTypeName() != typeid(ESM::NPC).name());
-
-        // actor id
-        if (!info.actor.empty())
-            if (toLower (info.actor)!=MWWorld::Class::get (actor).getId (actor))
-                return false;
-
-        //NPC race
-        if (!info.race.empty())
-        {
-            if (isCreature)
-                return false;
-
-            MWWorld::LiveCellRef<ESM::NPC> *cellRef = actor.get<ESM::NPC>();
-
-            if (!cellRef)
-                return false;
-
-            if (toLower (info.race)!=toLower (cellRef->base->race))
-                return false;
-        }
-
-        //NPC class
-        if (!info.clas.empty())
-        {
-            if (isCreature)
-                return false;
-
-            MWWorld::LiveCellRef<ESM::NPC> *cellRef = actor.get<ESM::NPC>();
-
-            if (!cellRef)
-                return false;
-
-            if (toLower (info.clas)!=toLower (cellRef->base->cls))
-                return false;
-        }
-
-        //NPC faction
-        if (!info.npcFaction.empty())
-        {
-            if (isCreature)
-                return false;
-
-            //MWWorld::Class npcClass = MWWorld::Class::get(actor);
-            MWMechanics::NpcStats stats = MWWorld::Class::get(actor).getNpcStats(actor);
-            std::map<std::string,int>::iterator it = stats.getFactionRanks().find(toLower(info.npcFaction));
-            if(it!=stats.getFactionRanks().end())
-            {
-                //check rank
-                if(it->second < (int)info.data.rank) return false;
-            }
-            else
-            {
-                //not in the faction
-                return false;
-            }
-        }
-
-        // TODO check player faction
-        if(!info.pcFaction.empty())
-        {
-            MWMechanics::NpcStats stats = MWWorld::Class::get(MWBase::Environment::get().getWorld()->getPlayer().getPlayer()).getNpcStats(MWBase::Environment::get().getWorld()->getPlayer().getPlayer());
-            std::map<std::string,int>::iterator it = stats.getFactionRanks().find(toLower(info.pcFaction));
-            if(it!=stats.getFactionRanks().end())
-            {
-                //check rank
-                if(it->second < (int)info.data.PCrank) return false;
-            }
-            else
-            {
-                //not in the faction
-                return false;
-            }
-        }
-
-        //check gender
-        if (!isCreature)
-        {
-            MWWorld::LiveCellRef<ESM::NPC>* npc = actor.get<ESM::NPC>();
-            if(npc->base->flags&npc->base->Female)
-            {
-                if(static_cast<int> (info.data.gender)==0)  return false;
-            }
-            else
-            {
-                if(static_cast<int> (info.data.gender)==1)  return false;
-            }
-        }
-
-        // check cell
-        if (!info.cell.empty())
-            if (MWBase::Environment::get().getWorld()->getPlayer().getPlayer().getCell()->cell->name != info.cell)
-                return false;
-
-        // TODO check DATAstruct
-        for (std::vector<ESM::DialInfo::SelectStruct>::const_iterator iter (info.selects.begin());
-            iter != info.selects.end(); ++iter)
-            if (!isMatching (actor, *iter))
-                return false;
-
-        return true;
-    }
-
-    DialogueManager::DialogueManager (const Compiler::Extensions& extensions) :
+    DialogueManager::DialogueManager (const Compiler::Extensions& extensions, bool scriptVerbose, Translation::Storage& translationDataStorage) :
       mCompilerContext (MWScript::CompilerContext::Type_Dialgoue),
         mErrorStream(std::cout.rdbuf()),mErrorHandler(mErrorStream)
+      , mTemporaryDispositionChange(0.f)
+      , mPermanentDispositionChange(0.f), mScriptVerbose (scriptVerbose)
+      , mTranslationDataStorage(translationDataStorage)
+      , mTalkedTo(false)
     {
         mChoice = -1;
         mIsInChoice = false;
         mCompilerContext.setExtensions (&extensions);
-        mDialogueMap.clear();
-        mActorKnownTopics.clear();
-        ESMS::RecListCaseT<ESM::Dialogue>::MapType dialogueList = MWBase::Environment::get().getWorld()->getStore().dialogs.list;
-        for(ESMS::RecListCaseT<ESM::Dialogue>::MapType::iterator it = dialogueList.begin(); it!=dialogueList.end();it++)
+
+        const MWWorld::Store<ESM::Dialogue> &dialogs =
+            MWBase::Environment::get().getWorld()->getStore().get<ESM::Dialogue>();
+
+        MWWorld::Store<ESM::Dialogue>::iterator it = dialogs.begin();
+        for (; it != dialogs.end(); ++it)
         {
-            mDialogueMap[toLower(it->first)] = it->second;
+            mDialogueMap[Misc::StringUtils::lowerCase(it->mId)] = *it;
         }
+    }
+
+    void DialogueManager::clear()
+    {
+        mKnownTopics.clear();
+        mTalkedTo = false;
+        mTemporaryDispositionChange = 0;
+        mPermanentDispositionChange = 0;
     }
 
     void DialogueManager::addTopic (const std::string& topic)
     {
-        mKnownTopics[toLower(topic)] = true;
+        mKnownTopics[Misc::StringUtils::lowerCase(topic)] = true;
     }
 
-    void DialogueManager::parseText (std::string text)
+    void DialogueManager::parseText (const std::string& text)
     {
-        std::list<std::string>::iterator it;
-        for(it = mActorKnownTopics.begin();it != mActorKnownTopics.end();++it)
+        std::vector<HyperTextToken> hypertext = ParseHyperText(text);
+
+        //calculation of standard form fir all hyperlinks
+        for (size_t i = 0; i < hypertext.size(); ++i)
         {
-            size_t pos = find_str_ci(text,*it,0);
-            if(pos !=std::string::npos)
+            if (hypertext[i].mLink)
             {
-                if(pos==0)
+                size_t asterisk_count = MWDialogue::RemovePseudoAsterisks(hypertext[i].mText);
+                for(; asterisk_count > 0; --asterisk_count)
+                    hypertext[i].mText.append("*");
+
+                hypertext[i].mText = mTranslationDataStorage.topicStandardForm(hypertext[i].mText);
+            }
+        }
+
+        for (size_t i = 0; i < hypertext.size(); ++i)
+        {
+            std::list<std::string>::iterator it;
+            for(it = mActorKnownTopics.begin(); it != mActorKnownTopics.end(); ++it)
+            {
+                if (hypertext[i].mLink)
                 {
-                    mKnownTopics[*it] = true;
+                    if( hypertext[i].mText == *it )
+                    {
+                        mKnownTopics[hypertext[i].mText] = true;
+                    }
                 }
-                else if(text.substr(pos -1,1) == " ")
+                else if( !mTranslationDataStorage.hasTranslation() )
                 {
-                    mKnownTopics[*it] = true;
+                    size_t pos = Misc::StringUtils::lowerCase(hypertext[i].mText).find(*it, 0);
+                    if(pos !=std::string::npos)
+                    {
+                        mKnownTopics[*it] = true;
+                    }
                 }
             }
         }
+
         updateTopics();
     }
 
     void DialogueManager::startDialogue (const MWWorld::Ptr& actor)
     {
+        mLastTopic = "";
+        mPermanentDispositionChange = 0;
+        mTemporaryDispositionChange = 0;
+
         mChoice = -1;
         mIsInChoice = false;
 
         mActor = actor;
 
+        MWMechanics::CreatureStats& creatureStats = MWWorld::Class::get (actor).getCreatureStats (actor);
+        mTalkedTo = creatureStats.hasTalkedToPlayer();
+
         mActorKnownTopics.clear();
 
-        //initialise the GUI
-        MWBase::Environment::get().getWindowManager()->pushGuiMode(MWGui::GM_Dialogue);
         MWGui::DialogueWindow* win = MWBase::Environment::get().getWindowManager()->getDialogueWindow();
         win->startDialogue(actor, MWWorld::Class::get (actor).getName (actor));
 
         //setup the list of topics known by the actor. Topics who are also on the knownTopics list will be added to the GUI
         updateTopics();
+        updateGlobals();
 
         //greeting
-        bool greetingFound = false;
-        //ESMS::RecListT<ESM::Dialogue>::MapType dialogueList = MWBase::Environment::get().getWorld()->getStore().dialogs.list;
-        ESMS::RecListCaseT<ESM::Dialogue>::MapType dialogueList = MWBase::Environment::get().getWorld()->getStore().dialogs.list;
-        for(ESMS::RecListCaseT<ESM::Dialogue>::MapType::iterator it = dialogueList.begin(); it!=dialogueList.end();it++)
-        {
-            ESM::Dialogue ndialogue = it->second;
-            if(ndialogue.type == ESM::Dialogue::Greeting)
-            {
-                if (greetingFound) break;
-                for (std::vector<ESM::DialInfo>::const_iterator iter (it->second.mInfo.begin());
-                    iter!=it->second.mInfo.end(); ++iter)
-                {
-                    if (isMatching (actor, *iter) && functionFilter(mActor,*iter,true))
-                    {
-                        if (!iter->sound.empty())
-                        {
-                            // TODO play sound
-                        }
+        const MWWorld::Store<ESM::Dialogue> &dialogs =
+            MWBase::Environment::get().getWorld()->getStore().get<ESM::Dialogue>();
 
-                        std::string text = iter->response;
-                        parseText(text);
-                        win->addText(iter->response);
-                        executeScript(iter->resultScript);
-                        greetingFound = true;
-                        mLastTopic = it->first;
-                        mLastDialogue = *iter;
-                        break;
+        Filter filter (actor, mChoice, mTalkedTo);
+
+        for (MWWorld::Store<ESM::Dialogue>::iterator it = dialogs.begin(); it != dialogs.end(); ++it)
+        {
+            if(it->mType == ESM::Dialogue::Greeting)
+            {
+                // Search a response (we do not accept a fallback to "Info refusal" here)
+                if (const ESM::DialInfo *info = filter.search (*it, false))
+                {
+                    //initialise the GUI
+                    MWBase::Environment::get().getWindowManager()->pushGuiMode(MWGui::GM_Dialogue);
+
+                    creatureStats.talkedToPlayer();
+
+                    if (!info->mSound.empty())
+                    {
+                        // TODO play sound
                     }
+
+                    parseText (info->mResponse);
+
+                    MWScript::InterpreterContext interpreterContext(&mActor.getRefData().getLocals(),mActor);
+                    win->addResponse (Interpreter::fixDefinesDialog(info->mResponse, interpreterContext));
+                    executeScript (info->mResultScript);
+                    mLastTopic = Misc::StringUtils::lowerCase(it->mId);
+                    break;
                 }
             }
         }
@@ -675,6 +183,8 @@ namespace MWDialogue
 
     bool DialogueManager::compile (const std::string& cmd,std::vector<Interpreter::Type_Code>& code)
     {
+        bool success = true;
+
         try
         {
             mErrorHandler.reset();
@@ -696,26 +206,36 @@ namespace MWDialogue
             Compiler::ScriptParser parser(mErrorHandler,mCompilerContext, locals, false);
 
             scanner.scan (parser);
-            if(mErrorHandler.isGood())
-            {
-                parser.getCode(code);
-                return true;
-            }
-            return false;
+
+            if (!mErrorHandler.isGood())
+                success = false;
+
+            if (success)
+                parser.getCode (code);
         }
         catch (const Compiler::SourceException& /* error */)
         {
             // error has already been reported via error handler
+            success = false;
         }
         catch (const std::exception& error)
         {
-            printError (std::string ("An exception has been thrown: ") + error.what());
+            std::cerr << std::string ("Dialogue error: An exception has been thrown: ") + error.what() << std::endl;
+            success = false;
         }
 
-        return false;
+        if (!success && mScriptVerbose)
+        {
+            std::cerr
+                << "compiling failed (dialogue script)" << std::endl
+                << cmd
+                << std::endl << std::endl;
+        }
+
+        return success;
     }
 
-    void DialogueManager::executeScript(std::string script)
+    void DialogueManager::executeScript (const std::string& script)
     {
         std::vector<Interpreter::Type_Code> code;
         if(compile(script,code))
@@ -729,9 +249,60 @@ namespace MWDialogue
             }
             catch (const std::exception& error)
             {
-                printError (std::string ("An exception has been thrown: ") + error.what());
+                std::cerr << std::string ("Dialogue error: An exception has been thrown: ") + error.what();
             }
         }
+    }
+
+    void DialogueManager::executeTopic (const std::string& topic)
+    {
+        Filter filter (mActor, mChoice, mTalkedTo);
+
+        const MWWorld::Store<ESM::Dialogue> &dialogues =
+            MWBase::Environment::get().getWorld()->getStore().get<ESM::Dialogue>();
+
+        const ESM::Dialogue& dialogue = *dialogues.find (topic);
+
+        MWGui::DialogueWindow* win = MWBase::Environment::get().getWindowManager()->getDialogueWindow();
+
+        const ESM::DialInfo* info = filter.search(dialogue, true);
+        if (info)
+        {
+            parseText (info->mResponse);
+
+            std::string title;
+            if (dialogue.mType==ESM::Dialogue::Persuasion)
+            {
+                std::string modifiedTopic = "s" + topic;
+
+                modifiedTopic.erase (std::remove (modifiedTopic.begin(), modifiedTopic.end(), ' '), modifiedTopic.end());
+
+                const MWWorld::Store<ESM::GameSetting>& gmsts =
+                    MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
+
+                title = gmsts.find (modifiedTopic)->getString();
+            }
+            else
+                title = topic;
+
+            MWScript::InterpreterContext interpreterContext(&mActor.getRefData().getLocals(),mActor);
+            win->addResponse (Interpreter::fixDefinesDialog(info->mResponse, interpreterContext), title);
+            MWBase::Environment::get().getJournal()->addTopic (topic, info->mId, mActor.getClass().getName(mActor));
+
+            executeScript (info->mResultScript);
+
+            mLastTopic = topic;
+        }
+        else
+        {
+            // no response found, print a fallback text
+            win->addResponse ("…", topic);
+        }
+    }
+
+    void DialogueManager::updateGlobals()
+    {
+        MWBase::Environment::get().getWorld()->updateDialogueGlobals();
     }
 
     void DialogueManager::updateTopics()
@@ -740,25 +311,25 @@ namespace MWDialogue
         int choice = mChoice;
         mChoice = -1;
         mActorKnownTopics.clear();
-        MWGui::DialogueWindow* win = MWBase::Environment::get().getWindowManager()->getDialogueWindow();
-        ESMS::RecListCaseT<ESM::Dialogue>::MapType dialogueList = MWBase::Environment::get().getWorld()->getStore().dialogs.list;
-        for(ESMS::RecListCaseT<ESM::Dialogue>::MapType::iterator it = dialogueList.begin(); it!=dialogueList.end();it++)
+
+        const MWWorld::Store<ESM::Dialogue> &dialogs =
+            MWBase::Environment::get().getWorld()->getStore().get<ESM::Dialogue>();
+
+        Filter filter (mActor, mChoice, mTalkedTo);
+
+        for (MWWorld::Store<ESM::Dialogue>::iterator iter = dialogs.begin(); iter != dialogs.end(); ++iter)
         {
-            ESM::Dialogue ndialogue = it->second;
-            if(ndialogue.type == ESM::Dialogue::Topic)
+            if (iter->mType == ESM::Dialogue::Topic)
             {
-                for (std::vector<ESM::DialInfo>::const_iterator iter (it->second.mInfo.begin());
-                    iter!=it->second.mInfo.end(); ++iter)
+                if (filter.responseAvailable (*iter))
                 {
-                    if (isMatching (mActor, *iter) && functionFilter(mActor,*iter,true))
+                    std::string lower = Misc::StringUtils::lowerCase(iter->mId);
+                    mActorKnownTopics.push_back (lower);
+
+                    //does the player know the topic?
+                    if (mKnownTopics.find (lower) != mKnownTopics.end())
                     {
-                        mActorKnownTopics.push_back(toLower(it->first));
-                        //does the player know the topic?
-                        if(mKnownTopics.find(toLower(it->first)) != mKnownTopics.end())
-                        {
-                            keywordList.push_back(it->first);
-                            break;
-                        }
+                        keywordList.push_back (iter->mId);
                     }
                 }
             }
@@ -769,15 +340,17 @@ namespace MWDialogue
         if (mActor.getTypeName() == typeid(ESM::NPC).name())
         {
             MWWorld::LiveCellRef<ESM::NPC>* ref = mActor.get<ESM::NPC>();
-            if (ref->base->mHasAI)
-                services = ref->base->mAiData.mServices;
+            if (ref->mBase->mHasAI)
+                services = ref->mBase->mAiData.mServices;
         }
         else if (mActor.getTypeName() == typeid(ESM::Creature).name())
         {
             MWWorld::LiveCellRef<ESM::Creature>* ref = mActor.get<ESM::Creature>();
-            if (ref->base->mHasAI)
-                services = ref->base->mAiData.mServices;
+            if (ref->mBase->mHasAI)
+                services = ref->mBase->mAiData.mServices;
         }
+
+        int windowServices = 0;
 
         if (services & ESM::NPC::Weapon
             || services & ESM::NPC::Armor
@@ -790,17 +363,32 @@ namespace MWDialogue
             || services & ESM::NPC::Apparatus
             || services & ESM::NPC::RepairItem
             || services & ESM::NPC::Misc)
-            win->setShowTrade(true);
-        else
-            win->setShowTrade(false);
+            windowServices |= MWGui::DialogueWindow::Service_Trade;
+
+        if(mActor.getTypeName() == typeid(ESM::NPC).name() && !mActor.get<ESM::NPC>()->mBase->mTransport.empty())
+            windowServices |= MWGui::DialogueWindow::Service_Travel;
 
         if (services & ESM::NPC::Spells)
-            win->setShowSpells(true);
-        else
-            win->setShowSpells(false);
+            windowServices |= MWGui::DialogueWindow::Service_BuySpells;
+
+        if (services & ESM::NPC::Spellmaking)
+            windowServices |= MWGui::DialogueWindow::Service_CreateSpells;
+
+        if (services & ESM::NPC::Training)
+            windowServices |= MWGui::DialogueWindow::Service_Training;
+
+        if (services & ESM::NPC::Enchanting)
+            windowServices |= MWGui::DialogueWindow::Service_Enchant;
+
+        if (services & ESM::NPC::Repair)
+            windowServices |= MWGui::DialogueWindow::Service_Repair;
+
+        MWGui::DialogueWindow* win = MWBase::Environment::get().getWindowManager()->getDialogueWindow();
+
+        win->setServices (windowServices);
 
         // sort again, because the previous sort was case-sensitive
-        keywordList.sort(stringCompareNoCase);
+        keywordList.sort(Misc::StringUtils::ciEqual);
         win->setKeywords(keywordList);
 
         mChoice = choice;
@@ -813,29 +401,9 @@ namespace MWDialogue
             if(mDialogueMap.find(keyword) != mDialogueMap.end())
             {
                 ESM::Dialogue ndialogue = mDialogueMap[keyword];
-                if(ndialogue.type == ESM::Dialogue::Topic)
+                if (mDialogueMap[keyword].mType == ESM::Dialogue::Topic)
                 {
-                    for (std::vector<ESM::DialInfo>::const_iterator iter  = ndialogue.mInfo.begin();
-                        iter!=ndialogue.mInfo.end(); ++iter)
-                    {
-                        if (isMatching (mActor, *iter) && functionFilter(mActor,*iter,true))
-                        {
-                            std::string text = iter->response;
-                            std::string script = iter->resultScript;
-
-                            parseText(text);
-
-                            MWGui::DialogueWindow* win = MWBase::Environment::get().getWindowManager()->getDialogueWindow();
-                            win->addTitle(keyword);
-                            win->addText(iter->response);
-
-                            executeScript(script);
-
-                            mLastTopic = keyword;
-                            mLastDialogue = *iter;
-                            break;
-                        }
-                    }
+                    executeTopic (keyword);
                 }
             }
         }
@@ -843,83 +411,271 @@ namespace MWDialogue
         updateTopics();
     }
 
+    bool DialogueManager::isInChoice() const
+    {
+        return mIsInChoice;
+    }
+
     void DialogueManager::goodbyeSelected()
     {
         MWBase::Environment::get().getWindowManager()->removeGuiMode(MWGui::GM_Dialogue);
+
+        // Apply disposition change to NPC's base disposition
+        if (mActor.getClass().isNpc())
+        {
+            MWMechanics::NpcStats& npcStats = MWWorld::Class::get(mActor).getNpcStats(mActor);
+            npcStats.setBaseDisposition(npcStats.getBaseDisposition() + mPermanentDispositionChange);
+        }
+        mPermanentDispositionChange = 0;
+        mTemporaryDispositionChange = 0;
     }
 
-    void DialogueManager::questionAnswered (const std::string& answer)
+    void DialogueManager::questionAnswered (int answer)
     {
-        if(mChoiceMap.find(answer) != mChoiceMap.end())
-        {
-            mChoice = mChoiceMap[answer];
+        mChoice = answer;
 
-            std::vector<ESM::DialInfo>::const_iterator iter;
-            if(mDialogueMap.find(mLastTopic) != mDialogueMap.end())
+        if (mDialogueMap.find(mLastTopic) != mDialogueMap.end())
+        {
+            Filter filter (mActor, mChoice, mTalkedTo);
+
+            if (mDialogueMap[mLastTopic].mType == ESM::Dialogue::Topic
+                    || mDialogueMap[mLastTopic].mType == ESM::Dialogue::Greeting)
             {
-                ESM::Dialogue ndialogue = mDialogueMap[mLastTopic];
-                if(ndialogue.type == ESM::Dialogue::Topic)
+                if (const ESM::DialInfo *info = filter.search (mDialogueMap[mLastTopic], true))
                 {
-                    for (std::vector<ESM::DialInfo>::const_iterator iter = ndialogue.mInfo.begin();
-                        iter!=ndialogue.mInfo.end(); ++iter)
-                    {
-                        if (isMatching (mActor, *iter) && functionFilter(mActor,*iter,true))
-                        {
-                            mChoiceMap.clear();
-                            mChoice = -1;
-                            mIsInChoice = false;
-                            MWGui::DialogueWindow* win = MWBase::Environment::get().getWindowManager()->getDialogueWindow();
-                            std::string text = iter->response;
-                            parseText(text);
-                            win->addText(text);
-                            executeScript(iter->resultScript);
-                            mLastTopic = mLastTopic;
-                            mLastDialogue = *iter;
-                            break;
-                        }
-                    }
+                    std::string text = info->mResponse;
+                    parseText (text);
+
+                    mChoice = -1;
+                    mIsInChoice = false;
+                    MWBase::Environment::get().getWindowManager()->getDialogueWindow()->clearChoices();
+
+                    MWScript::InterpreterContext interpreterContext(&mActor.getRefData().getLocals(),mActor);
+                    MWBase::Environment::get().getWindowManager()->getDialogueWindow()->addResponse (Interpreter::fixDefinesDialog(text, interpreterContext));
+                    MWBase::Environment::get().getJournal()->addTopic (mLastTopic, info->mId, mActor.getClass().getName(mActor));
+                    executeScript (info->mResultScript);
                 }
             }
-            updateTopics();
         }
-    }
 
-    void DialogueManager::printError (std::string error)
-    {
-        MWGui::DialogueWindow* win = MWBase::Environment::get().getWindowManager()->getDialogueWindow();
-        win->addText(error);
+        updateTopics();
     }
 
     void DialogueManager::askQuestion (const std::string& question, int choice)
     {
         MWGui::DialogueWindow* win = MWBase::Environment::get().getWindowManager()->getDialogueWindow();
-        win->askQuestion(question);
-        mChoiceMap[toLower(question)] = choice;
+        win->addChoice(question, choice);
         mIsInChoice = true;
     }
 
-    std::string DialogueManager::getFaction() const
+    MWWorld::Ptr DialogueManager::getActor() const
     {
-        if (mActor.getTypeName() != typeid(ESM::NPC).name())
-            return "";
-
-        std::string factionID("");
-        MWMechanics::NpcStats stats = MWWorld::Class::get(mActor).getNpcStats(mActor);
-        if(stats.getFactionRanks().empty())
-        {
-            std::cout << "No faction for this actor!";
-        }
-        else
-        {
-            factionID = stats.getFactionRanks().begin()->first;
-        }
-        return factionID;
+        return mActor;
     }
 
     void DialogueManager::goodbye()
     {
+        mIsInChoice = true;
+
         MWGui::DialogueWindow* win = MWBase::Environment::get().getWindowManager()->getDialogueWindow();
 
         win->goodbye();
+    }
+
+    void DialogueManager::persuade(int type)
+    {
+        bool success;
+        float temp, perm;
+        MWBase::Environment::get().getMechanicsManager()->getPersuasionDispositionChange(
+                    mActor, MWBase::MechanicsManager::PersuasionType(type), mTemporaryDispositionChange,
+                    success, temp, perm);
+        mTemporaryDispositionChange += temp;
+        mPermanentDispositionChange += perm;
+
+        // change temp disposition so that final disposition is between 0...100
+        int curDisp = MWBase::Environment::get().getMechanicsManager()->getDerivedDisposition(mActor);
+        if (curDisp + mTemporaryDispositionChange < 0)
+            mTemporaryDispositionChange = -curDisp;
+        else if (curDisp + mTemporaryDispositionChange > 100)
+            mTemporaryDispositionChange = 100 - curDisp;
+
+        MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+        MWWorld::Class::get(player).skillUsageSucceeded(player, ESM::Skill::Speechcraft, success ? 0 : 1);
+
+        std::string text;
+
+        if (type == MWBase::MechanicsManager::PT_Admire)
+            text = "Admire";
+        else if (type == MWBase::MechanicsManager::PT_Taunt)
+            text = "Taunt";
+        else if (type == MWBase::MechanicsManager::PT_Intimidate)
+            text = "Intimidate";
+        else{
+            text = "Bribe";
+        }
+
+        executeTopic (text + (success ? " Success" : " Fail"));
+    }
+
+    int DialogueManager::getTemporaryDispositionChange() const
+    {
+        return mTemporaryDispositionChange;
+    }
+
+    void DialogueManager::applyDispositionChange(int delta)
+    {
+        int oldTemp = mTemporaryDispositionChange;
+        mTemporaryDispositionChange += delta;
+        // don't allow increasing beyond 100 or decreasing below 0
+        int curDisp = MWBase::Environment::get().getMechanicsManager()->getDerivedDisposition(mActor);
+        if (curDisp + mTemporaryDispositionChange < 0)
+            mTemporaryDispositionChange = -curDisp;
+        else if (curDisp + mTemporaryDispositionChange > 100)
+            mTemporaryDispositionChange = 100 - curDisp;
+
+        int diff = mTemporaryDispositionChange - oldTemp;
+        mPermanentDispositionChange += diff;
+    }
+
+    bool DialogueManager::checkServiceRefused()
+    {
+        Filter filter (mActor, mChoice, mTalkedTo);
+
+        const MWWorld::Store<ESM::Dialogue> &dialogues =
+            MWBase::Environment::get().getWorld()->getStore().get<ESM::Dialogue>();
+
+        const ESM::Dialogue& dialogue = *dialogues.find ("Service Refusal");
+        MWGui::DialogueWindow* win = MWBase::Environment::get().getWindowManager()->getDialogueWindow();
+
+        std::vector<const ESM::DialInfo *> infos = filter.list (dialogue, false, false, true);
+        if (!infos.empty())
+        {
+            const ESM::DialInfo* info = infos[0];
+
+            parseText (info->mResponse);
+
+            const MWWorld::Store<ESM::GameSetting>& gmsts =
+                MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
+
+            MWScript::InterpreterContext interpreterContext(&mActor.getRefData().getLocals(),mActor);
+
+            win->addResponse (Interpreter::fixDefinesDialog(info->mResponse, interpreterContext),
+                              gmsts.find ("sServiceRefusal")->getString());
+
+            executeScript (info->mResultScript);
+            return true;
+        }
+        return false;
+    }
+
+    void DialogueManager::say(const MWWorld::Ptr &actor, const std::string &topic) const
+    {
+        MWBase::SoundManager *sndMgr = MWBase::Environment::get().getSoundManager();
+        if(!sndMgr->sayDone(actor))
+        {
+            // Actor is already saying something.
+            return;
+        }
+
+        const MWWorld::ESMStore &store = MWBase::Environment::get().getWorld()->getStore();
+        const ESM::Dialogue *dial = store.get<ESM::Dialogue>().find(topic);
+
+        Filter filter(actor, 0, false);
+        const ESM::DialInfo *info = filter.search(*dial, false);
+        if(info != NULL)
+        {
+            MWBase::WindowManager *winMgr = MWBase::Environment::get().getWindowManager();
+            if(winMgr->getSubtitlesEnabled())
+                winMgr->messageBox(info->mResponse);
+            if (!info->mSound.empty())
+                sndMgr->say(actor, info->mSound);
+        }
+    }
+
+    int DialogueManager::countSavedGameRecords() const
+    {
+        return 1; // known topics
+    }
+
+    void DialogueManager::write (ESM::ESMWriter& writer) const
+    {
+        ESM::DialogueState state;
+
+        for (std::map<std::string, bool>::const_iterator iter (mKnownTopics.begin());
+            iter!=mKnownTopics.end(); ++iter)
+            if (iter->second)
+                state.mKnownTopics.push_back (iter->first);
+
+        writer.startRecord (ESM::REC_DIAS);
+        state.save (writer);
+        writer.endRecord (ESM::REC_DIAS);
+    }
+
+    void DialogueManager::readRecord (ESM::ESMReader& reader, int32_t type)
+    {
+        if (type==ESM::REC_DIAS)
+        {
+            const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
+
+            ESM::DialogueState state;
+            state.load (reader);
+
+            for (std::vector<std::string>::const_iterator iter (state.mKnownTopics.begin());
+                iter!=state.mKnownTopics.end(); ++iter)
+                if (store.get<ESM::Dialogue>().search (*iter))
+                    mKnownTopics.insert (std::make_pair (*iter, true));
+        }
+    }
+
+
+    std::vector<HyperTextToken> ParseHyperText(const std::string& text)
+    {
+        std::vector<HyperTextToken> result;
+        MyGUI::UString utext(text);
+        size_t pos_begin, pos_end, iteration_pos = 0;
+        for(;;)
+        {
+            pos_begin = utext.find('@', iteration_pos);
+            if (pos_begin != std::string::npos)
+                pos_end = utext.find('#', pos_begin);
+
+            if (pos_begin != std::string::npos && pos_end != std::string::npos)
+            {
+                result.push_back( HyperTextToken(utext.substr(iteration_pos, pos_begin - iteration_pos), false) );
+
+                std::string link = utext.substr(pos_begin + 1, pos_end - pos_begin - 1);
+                result.push_back( HyperTextToken(link, true) );
+
+                iteration_pos = pos_end + 1;
+            }
+            else
+            {
+                result.push_back( HyperTextToken(utext.substr(iteration_pos), false) );
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    size_t RemovePseudoAsterisks(std::string& phrase)
+    {
+        size_t pseudoAsterisksCount = 0;
+        const char specialPseudoAsteriskCharacter = 127;
+
+        if( !phrase.empty() )
+        {
+            std::string::reverse_iterator rit = phrase.rbegin();
+
+            while( rit != phrase.rend() && *rit == specialPseudoAsteriskCharacter )
+            {
+                pseudoAsterisksCount++;
+                ++rit;
+            }
+        }
+
+        phrase = phrase.substr(0, phrase.length() - pseudoAsterisksCount);
+
+        return pseudoAsterisksCount;
     }
 }

@@ -3,6 +3,14 @@
 
 #include <string>
 
+#include <stdint.h>
+
+namespace ESM
+{
+    class ESMReader;
+    class ESMWriter;
+}
+
 namespace MWWorld
 {
     class Ptr;
@@ -23,7 +31,11 @@ namespace MWBase
 
             DialogueManager() {}
 
+            virtual void clear() = 0;
+
             virtual ~DialogueManager() {}
+
+            virtual bool isInChoice() const = 0;
 
             virtual void startDialogue (const MWWorld::Ptr& actor) = 0;
 
@@ -33,13 +45,27 @@ namespace MWBase
 
             virtual void goodbye() = 0;
 
-            ///get the faction of the actor you are talking with
-            virtual std::string getFaction() const = 0;
+            virtual MWWorld::Ptr getActor() const = 0;
+            ///< Return the actor the player is currently talking to.
+
+            virtual void say(const MWWorld::Ptr &actor, const std::string &topic) const = 0;
 
             //calbacks for the GUI
             virtual void keywordSelected (const std::string& keyword) = 0;
             virtual void goodbyeSelected() = 0;
-            virtual void questionAnswered (const std::string& answer) = 0;
+            virtual void questionAnswered (int answer) = 0;
+
+            virtual bool checkServiceRefused () = 0;
+
+            virtual void persuade (int type) = 0;
+            virtual int getTemporaryDispositionChange () const = 0;
+            virtual void applyDispositionChange (int delta) = 0;
+
+            virtual int countSavedGameRecords() const = 0;
+
+            virtual void write (ESM::ESMWriter& writer) const = 0;
+
+            virtual void readRecord (ESM::ESMReader& reader, int32_t type) = 0;
     };
 }
 

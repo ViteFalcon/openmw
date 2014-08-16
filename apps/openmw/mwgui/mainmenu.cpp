@@ -1,84 +1,255 @@
 #include "mainmenu.hpp"
 
-#include <OgreRoot.h>
+#include <components/version/version.hpp>
 
 #include "../mwbase/environment.hpp"
-#include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
+#include "../mwbase/soundmanager.hpp"
+#include "../mwbase/world.hpp"
+#include "../mwbase/journal.hpp"
+#include "../mwbase/dialoguemanager.hpp"
+#include "../mwbase/statemanager.hpp"
+
+#include "../mwstate/character.hpp"
+
+#include "savegamedialog.hpp"
+#include "confirmationdialog.hpp"
 
 namespace MWGui
 {
 
     MainMenu::MainMenu(int w, int h)
         : OEngine::GUI::Layout("openmw_mainmenu.layout")
-        , mButtonBox(0)
+        , mButtonBox(0), mWidth (w), mHeight (h)
+        , mSaveGameDialog(NULL)
+        , mBackground(NULL)
     {
-        onResChange(w,h);
+        getWidget(mVersionText, "VersionText");
+        std::stringstream sstream;
+        sstream << "OpenMW version: " << OPENMW_VERSION;
+
+        // adding info about git hash if available
+        std::string rev = OPENMW_VERSION_COMMITHASH;
+        std::string tag = OPENMW_VERSION_TAGHASH;
+        if (!rev.empty() && !tag.empty())
+        {
+                rev = rev.substr(0,10);
+                sstream << "\nrevision: " <<  rev;
+        }
+        
+        std::string output = sstream.str();
+        mVersionText->setCaption(output);
+
+        updateMenu();
+    }
+
+    MainMenu::~MainMenu()
+    {
+        delete mSaveGameDialog;
     }
 
     void MainMenu::onResChange(int w, int h)
     {
-        setCoord(0,0,w,h);
+        mWidth = w;
+        mHeight = h;
 
-        int height = 64 * 3;
+        updateMenu();
+    }
 
-        if (mButtonBox)
-            MyGUI::Gui::getInstance ().destroyWidget(mButtonBox);
+    void MainMenu::setVisible (bool visible)
+    {
+        if (visible)
+            updateMenu();
+        else
+            showBackground(
+                        MWBase::Environment::get().getWindowManager()->containsMode(MWGui::GM_MainMenu) &&
+                        MWBase::Environment::get().getStateManager()->getState() == MWBase::StateManager::State_NoGame);
 
-        mButtonBox = mMainWidget->createWidget<MyGUI::Widget>("", MyGUI::IntCoord(w/2 - 64, h/2 - height/2, 128, height), MyGUI::Align::Default);
+        OEngine::GUI::Layout::setVisible (visible);
+    }
+
+    void MainMenu::onNewGameConfirmed()
+    {
+        MWBase::Environment::get().getStateManager()->newGame();
+    }
+
+    void MainMenu::onExitConfirmed()
+    {
+        MWBase::Environment::get().getStateManager()->requestQuit();
+    }
+
+    void MainMenu::onButtonClicked(MyGUI::Widget *sender)
+    {
+        std::string name = *sender->getUserData<std::string>();
+        MWBase::Environment::get().getSoundManager()->playSound("Menu Click", 1.f, 1.f);
+        if (name == "return")
+        {
+            MWBase::Environment::get().getSoundManager ()->resumeSounds (MWBase::SoundManager::Play_TypeSfx);
+            MWBase::Environment::get().getWindowManager ()->removeGuiMode (GM_MainMenu);
+        }
+        else if (name == "options")
+            MWBase::Environment::get().getWindowManager ()->pushGuiMode (GM_Settings);
+        else if (name == "credits")
+            MWBase::Environment::get().getWindowManager()->playVideo("mw_credits.bik", true);
+        else if (name == "exitgame")
+        {
+            if (MWBase::Environment::get().getStateManager()->getState() == MWBase::StateManager::State_NoGame)
+                onExitConfirmed();
+            else
+            {
+                ConfirmationDialog* dialog = MWBase::Environment::get().getWindowManager()->getConfirmationDialog();
+                dialog->open("#{sMessage2}");
+                dialog->eventOkClicked.clear();
+                dialog->eventOkClicked += MyGUI::newDelegate(this, &MainMenu::onExitConfirmed);
+                dialog->eventCancelClicked.clear();
+            }
+        }
+        else if (name == "newgame")
+        {
+            if (MWBase::Environment::get().getStateManager()->getState() == MWBase::StateManager::State_NoGame)
+                onNewGameConfirmed();
+            else
+            {
+                ConfirmationDialog* dialog = MWBase::Environment::get().getWindowManager()->getConfirmationDialog();
+                dialog->open("#{sNotifyMessage54}");
+                dialog->eventOkClicked.clear();
+                dialog->eventOkClicked += MyGUI::newDelegate(this, &MainMenu::onNewGameConfirmed);
+                dialog->eventCancelClicked.clear();
+            }
+        }
+
+        else
+        {
+            if (!mSaveGameDialog)
+                mSaveGameDialog = new SaveGameDialog();
+            if (name == "loadgame")
+                mSaveGameDialog->setLoadOrSave(true);
+            else if (name == "savegame")
+                mSaveGameDialog->setLoadOrSave(false);
+            mSaveGameDialog->setVisible(true);
+        }
+    }
+
+    void MainMenu::showBackground(bool show)
+    {
+        if (mBackground)
+        {
+            MyGUI::Gui::getInstance().destroyWidget(mBackground);
+            mBackground = NULL;
+        }
+        if (show)
+        {
+            if (!mBackground)
+            {
+                mBackground = MyGUI::Gui::getInstance().createWidgetReal<MyGUI::ImageBox>("ImageBox", 0,0,1,1,
+                    MyGUI::Align::Stretch, "Menu");
+                mBackground->setImageTexture("black.png");
+
+                // Use black bars to correct aspect ratio. The video player also does it, so we need to do it
+                // for mw_logo.bik to align correctly with menu_morrowind.dds.
+                MyGUI::IntSize screenSize = MyGUI::RenderManager::getInstance().getViewSize();
+
+                // No way to un-hardcode this right now, menu_morrowind.dds is 1024x512 but was designed for 4:3
+                double imageaspect = 4.0/3.0;
+
+                int leftPadding = std::max(0.0, (screenSize.width - screenSize.height * imageaspect) / 2);
+                int topPadding = std::max(0.0, (screenSize.height - screenSize.width / imageaspect) / 2);
+
+                MyGUI::ImageBox* image = mBackground->createWidget<MyGUI::ImageBox>("ImageBox",
+                    leftPadding, topPadding, screenSize.width - leftPadding*2, screenSize.height - topPadding*2, MyGUI::Align::Default);
+                image->setImageTexture("textures\\menu_morrowind.dds");
+            }
+        }
+    }
+
+    void MainMenu::updateMenu()
+    {
+        setCoord(0,0, mWidth, mHeight);
+
+        if (!mButtonBox)
+            mButtonBox = mMainWidget->createWidget<MyGUI::Widget>("", MyGUI::IntCoord(0, 0, 0, 0), MyGUI::Align::Default);
+
         int curH = 0;
 
-        mReturn = mButtonBox->createWidget<MyGUI::Button> ("ButtonImage", MyGUI::IntCoord(0, curH, 128, 64), MyGUI::Align::Default);
-        mReturn->setImageResource ("Menu_Return");
-        mReturn->eventMouseButtonClick += MyGUI::newDelegate(this, &MainMenu::returnToGame);
-        curH += 64;
+        MWBase::StateManager::State state = MWBase::Environment::get().getStateManager()->getState();
 
+        showBackground(state == MWBase::StateManager::State_NoGame);
 
-        /*
-        mNewGame = mButtonBox->createWidget<MyGUI::Button> ("ButtonImage", MyGUI::IntCoord(0, curH, 128, 64), MyGUI::Align::Default);
-        mNewGame->setImageResource ("Menu_NewGame");
-        curH += 64;
+        std::vector<std::string> buttons;
 
-        mLoadGame = mButtonBox->createWidget<MyGUI::Button> ("ButtonImage", MyGUI::IntCoord(0, curH, 128, 64), MyGUI::Align::Default);
-        mLoadGame->setImageResource ("Menu_LoadGame");
-        curH += 64;
+        if (state==MWBase::StateManager::State_Running)
+            buttons.push_back("return");
 
+        buttons.push_back("newgame");
 
-        mSaveGame = mButtonBox->createWidget<MyGUI::Button> ("ButtonImage", MyGUI::IntCoord(0, curH, 128, 64), MyGUI::Align::Default);
-        mSaveGame->setImageResource ("Menu_SaveGame");
-        curH += 64;
-        */
+        if (MWBase::Environment::get().getStateManager()->characterBegin()!=
+            MWBase::Environment::get().getStateManager()->characterEnd())
+            buttons.push_back("loadgame");
 
-        mOptions = mButtonBox->createWidget<MyGUI::Button> ("ButtonImage", MyGUI::IntCoord(0, curH, 128, 64), MyGUI::Align::Default);
-        mOptions->setImageResource ("Menu_Options");
-        mOptions->eventMouseButtonClick += MyGUI::newDelegate(this, &MainMenu::showOptions);
-        curH += 64;
+        if (state==MWBase::StateManager::State_Running &&
+            MWBase::Environment::get().getWorld()->getGlobalInt ("chargenstate")==-1)
+            buttons.push_back("savegame");
 
-        /*
-        mCredits = mButtonBox->createWidget<MyGUI::Button> ("ButtonImage", MyGUI::IntCoord(0, curH, 128, 64), MyGUI::Align::Default);
-        mCredits->setImageResource ("Menu_Credits");
-        curH += 64;
-        */
+        buttons.push_back("options");
 
-        mExitGame = mButtonBox->createWidget<MyGUI::Button> ("ButtonImage", MyGUI::IntCoord(0, curH, 128, 64), MyGUI::Align::Default);
-        mExitGame->setImageResource ("Menu_ExitGame");
-        mExitGame->eventMouseButtonClick += MyGUI::newDelegate(this, &MainMenu::exitGame);
-        curH += 64;
+        if (state==MWBase::StateManager::State_NoGame)
+            buttons.push_back("credits");
+
+        buttons.push_back("exitgame");
+
+        // Create new buttons if needed
+        for (std::vector<std::string>::iterator it = buttons.begin(); it != buttons.end(); ++it)
+        {
+            if (mButtons.find(*it) == mButtons.end())
+            {
+                MWGui::ImageButton* button = mButtonBox->createWidget<MWGui::ImageButton>
+                        ("ImageBox", MyGUI::IntCoord(0, curH, 0, 0), MyGUI::Align::Default);
+                button->setProperty("ImageHighlighted", "textures\\menu_" + *it + "_over.dds");
+                button->setProperty("ImageNormal", "textures\\menu_" + *it + ".dds");
+                button->setProperty("ImagePushed", "textures\\menu_" + *it + "_pressed.dds");
+                button->eventMouseButtonClick += MyGUI::newDelegate(this, &MainMenu::onButtonClicked);
+                button->setUserData(std::string(*it));
+                mButtons[*it] = button;
+            }
+        }
+
+        // Start by hiding all buttons
+        int maxwidth = 0;
+        for (std::map<std::string, MWGui::ImageButton*>::iterator it = mButtons.begin(); it != mButtons.end(); ++it)
+        {
+            it->second->setVisible(false);
+            MyGUI::IntSize requested = it->second->getRequestedSize();
+            if (requested.width > maxwidth)
+                maxwidth = requested.width;
+        }
+
+        // Now show and position the ones we want
+        for (std::vector<std::string>::iterator it = buttons.begin(); it != buttons.end(); ++it)
+        {
+            assert(mButtons.find(*it) != mButtons.end());
+            MWGui::ImageButton* button = mButtons[*it];
+            button->setVisible(true);
+
+            MyGUI::IntSize requested = button->getRequestedSize();
+
+            // Trim off some of the excessive padding
+            // TODO: perhaps do this within ImageButton?
+            int trim = 8;
+            button->setImageCoord(MyGUI::IntCoord(0, trim, requested.width, requested.height-trim));
+            int height = requested.height-trim*2;
+            button->setImageTile(MyGUI::IntSize(requested.width, height));
+            button->setCoord((maxwidth-requested.width) / 2, curH, requested.width, height);
+            curH += height;
+        }
+
+        if (state == MWBase::StateManager::State_NoGame)
+        {
+            // Align with the background image
+            int bottomPadding=48;
+            mButtonBox->setCoord (mWidth/2 - maxwidth/2, mHeight - curH - bottomPadding, maxwidth, curH);
+        }
+        else
+            mButtonBox->setCoord (mWidth/2 - maxwidth/2, mHeight/2 - curH/2, maxwidth, curH);
+
     }
-
-    void MainMenu::returnToGame(MyGUI::Widget* sender)
-    {
-        MWBase::Environment::get().getWindowManager ()->removeGuiMode (GM_MainMenu);
-    }
-
-    void MainMenu::showOptions(MyGUI::Widget* sender)
-    {
-        MWBase::Environment::get().getWindowManager ()->pushGuiMode (GM_Settings);
-    }
-
-    void MainMenu::exitGame(MyGUI::Widget* sender)
-    {
-        Ogre::Root::getSingleton ().queueEndRendering ();
-    }
-
 }

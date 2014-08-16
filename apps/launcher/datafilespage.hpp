@@ -1,103 +1,136 @@
 #ifndef DATAFILESPAGE_H
 #define DATAFILESPAGE_H
 
+#include "ui_datafilespage.h"
 #include <QWidget>
-#include <QModelIndex>
 
-#include <components/files/collections.hpp>
 
-#include "combobox.hpp"
+#include <QDir>
+#include <QFile>
 
-class QTableWidget;
-class QStandardItemModel;
-class QItemSelection;
-class QItemSelectionModel;
 class QSortFilterProxyModel;
-class QStringListModel;
-class QSettings;
-class QAction;
-class QToolBar;
+class QAbstractItemModel;
 class QMenu;
-class PluginsModel;
-class PluginsView;
-class ComboBox;
 
 namespace Files { struct ConfigurationManager; }
+namespace ContentSelectorView { class ContentSelector; }
 
-class DataFilesPage : public QWidget
+namespace Launcher
 {
-    Q_OBJECT
+    class TextInputDialog;
+    class GameSettings;
+    class LauncherSettings;
+    class ProfilesComboBox;
 
-public:
-    DataFilesPage(Files::ConfigurationManager& cfg, QWidget *parent = 0);
+    class DataFilesPage : public QWidget
+    {
+        Q_OBJECT
 
-    ComboBox *mProfilesComboBox;
+        ContentSelectorView::ContentSelector *mSelector;
+        Ui::DataFilesPage ui;
 
-    void writeConfig(QString profile = QString());
-    bool setupDataFiles();
+    public:
+        explicit DataFilesPage (Files::ConfigurationManager &cfg, GameSettings &gameSettings,
+                                LauncherSettings &launcherSettings, QWidget *parent = 0);
 
-public slots:
-    void masterSelectionChanged(const QItemSelection &selected, const QItemSelection &deselected);
-    void setCheckState(QModelIndex index);
+        QAbstractItemModel* profilesModel() const;
 
-    void filterChanged(const QString filter);
-    void showContextMenu(const QPoint &point);
-    void profileChanged(const QString &previous, const QString &current);
+        int profilesIndex() const;
 
-    // Action slots
-    void newProfile();
-    void copyProfile();
-    void deleteProfile();
-    void moveUp();
-    void moveDown();
-    void moveTop();
-    void moveBottom();
-    void check();
-    void uncheck();
-    void refresh();
+        //void writeConfig(QString profile = QString());
+        void saveSettings(const QString &profile = "");
+        void loadSettings();
 
-private:
-    QTableWidget *mMastersWidget;
-    PluginsView *mPluginsTable;
+    signals:
+        void signalProfileChanged (int index);
 
-    QStandardItemModel *mDataFilesModel;
-    PluginsModel *mPluginsModel;
+    public slots:
+        void slotProfileChanged (int index);
 
-    QSortFilterProxyModel *mPluginsProxyModel;
-    QItemSelectionModel *mPluginsSelectModel;
+    private slots:
 
-    QToolBar *mProfileToolBar;
-    QMenu *mContextMenu;
+        void slotProfileChangedByUser(const QString &previous, const QString &current);
+        void slotProfileRenamed(const QString &previous, const QString &current);
+        void slotProfileDeleted(const QString &item);
 
-    QAction *mNewProfileAction;
-    QAction *mCopyProfileAction;
-    QAction *mDeleteProfileAction;
+        void on_newProfileAction_triggered();
+        void on_deleteProfileAction_triggered();
 
-    QAction *mMoveUpAction;
-    QAction *mMoveDownAction;
-    QAction *mMoveTopAction;
-    QAction *mMoveBottomAction;
-    QAction *mCheckAction;
-    QAction *mUncheckAction;
+    private:
 
-    Files::ConfigurationManager &mCfgMgr;
-    Files::PathContainer mDataDirs;
-    Files::PathContainer mDataLocal;
+        QMenu *mContextMenu;
 
-    QSettings *mLauncherConfig;
+        Files::ConfigurationManager &mCfgMgr;
 
-    const QStringList checkedPlugins();
-    const QStringList selectedMasters();
+        GameSettings &mGameSettings;
+        LauncherSettings &mLauncherSettings;
 
-    void addDataFiles(Files::Collections &fileCollections, const QString &encoding);
-    void addPlugins(const QModelIndex &index);
-    void removePlugins(const QModelIndex &index);
-    void uncheckPlugins();
-    void createActions();
-    void setupConfig();
-    void readConfig();
-    void scrollToSelection();
+        QString mDataLocal;
 
-};
+        void setPluginsCheckstates(Qt::CheckState state);
 
+        void buildView();
+        void setupDataFiles();
+        void setupConfig();
+        void readConfig();
+        void setProfile (int index, bool savePrevious);
+        void setProfile (const QString &previous, const QString &current, bool savePrevious);
+        void removeProfile (const QString &profile);
+        bool showDeleteMessageBox (const QString &text);
+        void addProfile (const QString &profile, bool setAsCurrent);
+        void checkForDefaultProfile();
+
+        class PathIterator
+        {
+            QStringList::ConstIterator mCitEnd;
+            QStringList::ConstIterator mCitCurrent;
+            QStringList::ConstIterator mCitBegin;
+            QString mFile;
+            QString mFilePath;
+
+        public:
+            PathIterator (const QStringList &list)
+            {
+                mCitBegin = list.constBegin();
+                mCitCurrent = mCitBegin;
+                mCitEnd = list.constEnd();
+            }
+
+            QString findFirstPath (const QString &file)
+            {
+                mCitCurrent = mCitBegin;
+                mFile = file;
+                return path();
+            }
+
+            QString findNextPath () { return path(); }
+
+        private:
+
+            QString path ()
+            {
+                bool success = false;
+                QDir dir;
+                QFileInfo file;
+
+                while (!success)
+                {
+                    if (mCitCurrent == mCitEnd)
+                        break;
+
+                    dir.setPath (*(mCitCurrent++));
+                    file.setFile (dir.absoluteFilePath (mFile));
+
+                    success = file.exists();
+                }
+
+                if (success)
+                    return file.absoluteFilePath();
+
+                return "";
+            }
+
+        };
+    };
+}
 #endif

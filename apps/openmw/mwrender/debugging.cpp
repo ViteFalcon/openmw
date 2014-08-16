@@ -7,18 +7,22 @@
 #include <OgreMaterial.h>
 #include <OgreMaterialManager.h>
 #include <OgreManualObject.h>
+#include <OgreTechnique.h>
+#include <OgreSceneNode.h>
+
+#include <openengine/bullet/physic.hpp>
 
 #include <components/esm/loadstat.hpp>
 #include <components/esm/loadpgrd.hpp>
-
-#include <components/esm_store/store.hpp>
 
 #include "../mwbase/world.hpp" // these includes can be removed once the static-hack is gone
 #include "../mwbase/environment.hpp"
 
 #include "../mwworld/ptr.hpp"
+#include "../mwworld/cellstore.hpp"
+#include "../mwworld/esmstore.hpp"
 
-#include "player.hpp"
+#include "renderconst.hpp"
 
 using namespace Ogre;
 
@@ -71,20 +75,22 @@ ManualObject *Debugging::createPathgridLines(const ESM::Pathgrid *pathgrid)
     ManualObject *result = mSceneMgr->createManualObject();
 
     result->begin(PATHGRID_LINE_MATERIAL, RenderOperation::OT_LINE_LIST);
-    for(ESM::Pathgrid::EdgeList::const_iterator it = pathgrid->edges.begin();
-        it != pathgrid->edges.end();
+    for(ESM::Pathgrid::EdgeList::const_iterator it = pathgrid->mEdges.begin();
+        it != pathgrid->mEdges.end();
         ++it)
     {
         const ESM::Pathgrid::Edge &edge = *it;
-        const ESM::Pathgrid::Point &p1 = pathgrid->points[edge.v0], &p2 = pathgrid->points[edge.v1];
-        Vector3 direction = (Vector3(p2.x, p2.y, p2.z) - Vector3(p1.x, p1.y, p1.z));
+        const ESM::Pathgrid::Point &p1 = pathgrid->mPoints[edge.mV0], &p2 = pathgrid->mPoints[edge.mV1];
+        Vector3 direction = (Vector3(p2.mX, p2.mY, p2.mZ) - Vector3(p1.mX, p1.mY, p1.mZ));
         Vector3 lineDisplacement = direction.crossProduct(Vector3::UNIT_Z).normalisedCopy();
         lineDisplacement = lineDisplacement * POINT_MESH_BASE +
                                 Vector3(0, 0, 10); // move lines up a little, so they will be less covered by meshes/landscape
-        result->position(Vector3(p1.x, p1.y, p1.z) + lineDisplacement);
-        result->position(Vector3(p2.x, p2.y, p2.z) + lineDisplacement);
+        result->position(Vector3(p1.mX, p1.mY, p1.mZ) + lineDisplacement);
+        result->position(Vector3(p2.mX, p2.mY, p2.mZ) + lineDisplacement);
     }
     result->end();
+
+    result->setVisibilityFlags (RV_Debug);
 
     return result;
 }
@@ -98,11 +104,11 @@ ManualObject *Debugging::createPathgridPoints(const ESM::Pathgrid *pathgrid)
 
     bool first = true;
     uint32 startIndex = 0;
-    for(ESM::Pathgrid::PointList::const_iterator it = pathgrid->points.begin();
-        it != pathgrid->points.end();
+    for(ESM::Pathgrid::PointList::const_iterator it = pathgrid->mPoints.begin();
+        it != pathgrid->mPoints.end();
         it++, startIndex += 6)
     {
-        Vector3 pointPos(it->x, it->y, it->z);
+        Vector3 pointPos(it->mX, it->mY, it->mZ);
 
         if (!first)
         {
@@ -140,12 +146,14 @@ ManualObject *Debugging::createPathgridPoints(const ESM::Pathgrid *pathgrid)
 
     result->end();
 
+    result->setVisibilityFlags (RV_Debug);
+
     return result;
 }
 
-Debugging::Debugging(SceneNode *mwRoot, OEngine::Physic::PhysicEngine *engine) :
-    mMwRoot(mwRoot), mEngine(engine),
-    mSceneMgr(mwRoot->getCreator()),
+Debugging::Debugging(SceneNode *root, OEngine::Physic::PhysicEngine *engine) :
+    mRootNode(root), mEngine(engine),
+    mSceneMgr(root->getCreator()),
     mPathgridEnabled(false),
     mInteriorPathgridNode(NULL), mPathGridRoot(NULL),
     mGridMatsCreated(false)
@@ -179,14 +187,14 @@ bool Debugging::toggleRenderMode (int mode){
     return false;
 }
 
-void Debugging::cellAdded(MWWorld::Ptr::CellStore *store)
+void Debugging::cellAdded(MWWorld::CellStore *store)
 {
     mActiveCells.push_back(store);
     if (mPathgridEnabled)
         enableCellPathgrid(store);
 }
 
-void Debugging::cellRemoved(MWWorld::Ptr::CellStore *store)
+void Debugging::cellRemoved(MWWorld::CellStore *store)
 {
     mActiveCells.erase(std::remove(mActiveCells.begin(), mActiveCells.end(), store), mActiveCells.end());
     if (mPathgridEnabled)
@@ -201,7 +209,7 @@ void Debugging::togglePathgrid()
         createGridMaterials();
 
         // add path grid meshes to already loaded cells
-        mPathGridRoot = mMwRoot->createChildSceneNode();
+        mPathGridRoot = mRootNode->createChildSceneNode();
         for(CellList::iterator it = mActiveCells.begin(); it != mActiveCells.end(); ++it)
         {
             enableCellPathgrid(*it);
@@ -221,24 +229,25 @@ void Debugging::togglePathgrid()
     }
 }
 
-void Debugging::enableCellPathgrid(MWWorld::Ptr::CellStore *store)
+void Debugging::enableCellPathgrid(MWWorld::CellStore *store)
 {
-    ESM::Pathgrid *pathgrid = MWBase::Environment::get().getWorld()->getStore().pathgrids.search(*store->cell);
+    const ESM::Pathgrid *pathgrid =
+        MWBase::Environment::get().getWorld()->getStore().get<ESM::Pathgrid>().search(*store->getCell());
     if (!pathgrid) return;
 
     Vector3 cellPathGridPos(0, 0, 0);
-    if (store->cell->isExterior())
+    if (store->getCell()->isExterior())
     {
-        cellPathGridPos.x = store->cell->data.gridX * ESM::Land::REAL_SIZE;
-        cellPathGridPos.y = store->cell->data.gridY * ESM::Land::REAL_SIZE;
+        cellPathGridPos.x = store->getCell()->mData.mX * ESM::Land::REAL_SIZE;
+        cellPathGridPos.y = store->getCell()->mData.mY * ESM::Land::REAL_SIZE;
     }
     SceneNode *cellPathGrid = mPathGridRoot->createChildSceneNode(cellPathGridPos);
     cellPathGrid->attachObject(createPathgridLines(pathgrid));
     cellPathGrid->attachObject(createPathgridPoints(pathgrid));
 
-    if (store->cell->isExterior())
+    if (store->getCell()->isExterior())
     {
-        mExteriorPathgridNodes[std::make_pair(store->cell->data.gridX, store->cell->data.gridY)] = cellPathGrid;
+        mExteriorPathgridNodes[std::make_pair(store->getCell()->getGridX(), store->getCell()->getGridY())] = cellPathGrid;
     }
     else
     {
@@ -247,12 +256,12 @@ void Debugging::enableCellPathgrid(MWWorld::Ptr::CellStore *store)
     }
 }
 
-void Debugging::disableCellPathgrid(MWWorld::Ptr::CellStore *store)
+void Debugging::disableCellPathgrid(MWWorld::CellStore *store)
 {
-    if (store->cell->isExterior())
+    if (store->getCell()->isExterior())
     {
         ExteriorPathgridNodes::iterator it =
-                mExteriorPathgridNodes.find(std::make_pair(store->cell->data.gridX, store->cell->data.gridY));
+                mExteriorPathgridNodes.find(std::make_pair(store->getCell()->getGridX(), store->getCell()->getGridY()));
         if (it != mExteriorPathgridNodes.end())
         {
             destroyCellPathgridNode(it->second);

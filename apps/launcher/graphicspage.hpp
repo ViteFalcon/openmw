@@ -5,65 +5,53 @@
 
 #include <OgreRoot.h>
 #include <OgreRenderSystem.h>
-#include <OgreConfigFile.h>
-#include <OgreConfigDialog.h>
 
-// Static plugin headers
-#ifdef ENABLE_PLUGIN_GL
-# include "OgreGLPlugin.h"
-#endif
-#ifdef ENABLE_PLUGIN_Direct3D9
-# include "OgreD3D9Plugin.h"
-#endif
+#include <components/ogreinit/ogreinit.hpp>
 
-class QComboBox;
-class QCheckBox;
-class QStackedWidget;
-class QSettings;
+
+#include "ui_graphicspage.h"
+
 
 namespace Files { struct ConfigurationManager; }
 
-class GraphicsPage : public QWidget
+namespace Launcher
 {
-    Q_OBJECT
+    class GraphicsSettings;
 
-public:
-    GraphicsPage(Files::ConfigurationManager &cfg, QWidget *parent = 0);
+    class GraphicsPage : public QWidget, private Ui::GraphicsPage
+    {
+        Q_OBJECT
 
-    bool setupOgre();
-    void writeConfig();
+    public:
+        GraphicsPage(Files::ConfigurationManager &cfg, GraphicsSettings &graphicsSettings, QWidget *parent = 0);
 
-public slots:
-    void rendererChanged(const QString &renderer);
+        void saveSettings();
+        bool loadSettings();
 
-private:
-    Ogre::Root *mOgre;
-    Ogre::RenderSystem *mSelectedRenderSystem;
-    Ogre::RenderSystem *mOpenGLRenderSystem;
-    Ogre::RenderSystem *mDirect3DRenderSystem;
- 	#ifdef ENABLE_PLUGIN_GL
- 	Ogre::GLPlugin* mGLPlugin;
- 	#endif
-	#ifdef ENABLE_PLUGIN_Direct3D9
- 	Ogre::D3D9Plugin* mD3D9Plugin;
- 	#endif
+    public slots:
+        void rendererChanged(const QString &renderer);
+        void screenChanged(int screen);
 
-    QComboBox *mRendererComboBox;
+    private slots:
+        void slotFullScreenChanged(int state);
+        void slotStandardToggled(bool checked);
 
-    QStackedWidget *mDisplayStackedWidget;
+    private:
+        OgreInit::OgreInit mOgreInit;
+        Ogre::Root *mOgre;
+        Ogre::RenderSystem *mSelectedRenderSystem;
+        Ogre::RenderSystem *mOpenGLRenderSystem;
+        Ogre::RenderSystem *mDirect3DRenderSystem;
 
-    QComboBox *mAntiAliasingComboBox;
-    QComboBox *mResolutionComboBox;
-    QCheckBox *mVSyncCheckBox;
-    QCheckBox *mFullScreenCheckBox;
+        Files::ConfigurationManager &mCfgMgr;
+        GraphicsSettings &mGraphicsSettings;
 
-    Files::ConfigurationManager &mCfgMgr;
+        QStringList getAvailableOptions(const QString &key, Ogre::RenderSystem *renderer);
+        QStringList getAvailableResolutions(int screen);
+        QRect getMaximumResolution();
 
-    QStringList getAvailableOptions(const QString &key, Ogre::RenderSystem *renderer);
-    QStringList getAvailableResolutions(Ogre::RenderSystem *renderer);
-
-    void createPages();
-    void readConfig();
-};
-
+        bool setupOgre();
+        bool setupSDL();
+    };
+}
 #endif

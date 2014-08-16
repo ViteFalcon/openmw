@@ -1,89 +1,151 @@
-#ifndef _GAME_RENDER_NPCANIMATION_H
-#define _GAME_RENDER_NPCANIMATION_H
+#ifndef GAME_RENDER_NPCANIMATION_H
+#define GAME_RENDER_NPCANIMATION_H
 
 #include "animation.hpp"
 
-#include "components/nifogre/ogre_nif_loader.hpp"
 #include "../mwworld/inventorystore.hpp"
-#include "../mwclass/npc.hpp"
-#include "../mwworld/containerstore.hpp"
 
-namespace MWRender{
+#include "weaponanimation.hpp"
 
-class NpcAnimation: public Animation{
+namespace ESM
+{
+    struct NPC;
+}
+
+namespace MWRender
+{
+
+class HeadAnimationTime : public Ogre::ControllerValue<Ogre::Real>
+{
 private:
-    MWWorld::InventoryStore& mInv;
-    int mStateID;
+    MWWorld::Ptr mReference;
+public:
+    HeadAnimationTime(MWWorld::Ptr reference) : mReference(reference) {}
 
-    int mPartslots[27];  //Each part slot is taken by clothing, armor, or is empty
-    int mPartPriorities[27];
+    virtual Ogre::Real getValue() const;
+    virtual void setValue(Ogre::Real value)
+    { }
+};
 
-    //Bounded Parts
-    NifOgre::EntityList lclavicle;
-    NifOgre::EntityList rclavicle;
-    NifOgre::EntityList rupperArm;
-    NifOgre::EntityList lupperArm;
-    NifOgre::EntityList rUpperLeg;
-    NifOgre::EntityList lUpperLeg;
-    NifOgre::EntityList lForearm;
-    NifOgre::EntityList rForearm;
-    NifOgre::EntityList lWrist;
-    NifOgre::EntityList rWrist;
-    NifOgre::EntityList rKnee;
-    NifOgre::EntityList lKnee;
-    NifOgre::EntityList neck;
-    NifOgre::EntityList rAnkle;
-    NifOgre::EntityList lAnkle;
-    NifOgre::EntityList groin;
-    NifOgre::EntityList skirt;
-    NifOgre::EntityList lfoot;
-    NifOgre::EntityList rfoot;
-    NifOgre::EntityList hair;
-    NifOgre::EntityList rHand;
-    NifOgre::EntityList lHand;
-    NifOgre::EntityList head;
-    NifOgre::EntityList chest;
-    NifOgre::EntityList tail;
+class NpcAnimation : public Animation, public WeaponAnimation, public MWWorld::InventoryStoreListener
+{
+public:
+    virtual void equipmentChanged() { updateParts(); }
+    virtual void permanentEffectAdded(const ESM::MagicEffect *magicEffect, bool isNew, bool playSound);
 
-    bool isBeast;
-    bool isFemale;
-    std::string headModel;
-    std::string hairModel;
-    std::string npcName;
-    std::string bodyRaceID;
-    float timeToChange;
-    MWWorld::ContainerStoreIterator robe;
-    MWWorld::ContainerStoreIterator helmet;
-    MWWorld::ContainerStoreIterator shirt;
-    MWWorld::ContainerStoreIterator cuirass;
-    MWWorld::ContainerStoreIterator greaves;
-    MWWorld::ContainerStoreIterator leftpauldron;
-    MWWorld::ContainerStoreIterator rightpauldron;
-    MWWorld::ContainerStoreIterator boots;
-    MWWorld::ContainerStoreIterator pants;
-    MWWorld::ContainerStoreIterator leftglove;
-    MWWorld::ContainerStoreIterator rightglove;
-    MWWorld::ContainerStoreIterator skirtiter;
+public:
+    typedef std::map<ESM::PartReferenceType,std::string> PartBoneMap;
+
+    enum ViewMode {
+        VM_Normal,
+        VM_FirstPerson,
+        VM_HeadOnly
+    };
+
+private:
+    static const PartBoneMap sPartList;
+
+    bool mListenerDisabled;
+
+    // Bounded Parts
+    NifOgre::ObjectScenePtr mObjectParts[ESM::PRT_Count];
+
+    const ESM::NPC *mNpc;
+    std::string    mHeadModel;
+    std::string    mHairModel;
+    ViewMode       mViewMode;
+    bool mShowWeapons;
+    bool mShowCarriedLeft;
+
+    enum NpcType
+    {
+        Type_Normal,
+        Type_Werewolf,
+        Type_Vampire
+    };
+    NpcType mNpcType;
 
     int mVisibilityFlags;
 
-public:
-    NpcAnimation(const MWWorld::Ptr& ptr, Ogre::SceneNode* node,
-                 MWWorld::InventoryStore& _inv, int visibilityFlags);
-    virtual ~NpcAnimation();
-    NifOgre::EntityList insertBoundedPart(const std::string &mesh, int group, const std::string &bonename);
-    virtual void runAnimation(float timepassed);
-    void updateParts();
-    void removeEntities(NifOgre::EntityList &entities);
-    void removeIndividualPart(int type);
-    void reserveIndividualPart(int type, int group, int priority);
+    int mPartslots[ESM::PRT_Count];  //Each part slot is taken by clothing, armor, or is empty
+    int mPartPriorities[ESM::PRT_Count];
 
-    bool addOrReplaceIndividualPart(int type, int group, int priority, const std::string &mesh);
+    Ogre::Vector3 mFirstPersonOffset;
+
+    Ogre::SharedPtr<HeadAnimationTime> mHeadAnimationTime;
+    Ogre::SharedPtr<WeaponAnimationTime> mWeaponAnimationTime;
+
+    float mAlpha;
+
+    void updateNpcBase();
+
+    NifOgre::ObjectScenePtr insertBoundedPart(const std::string &model, int group, const std::string &bonename,
+                                          bool enchantedGlow, Ogre::Vector3* glowColor=NULL);
+
+    void removeIndividualPart(ESM::PartReferenceType type);
+    void reserveIndividualPart(ESM::PartReferenceType type, int group, int priority);
+
+    bool addOrReplaceIndividualPart(ESM::PartReferenceType type, int group, int priority, const std::string &mesh,
+                                    bool enchantedGlow=false, Ogre::Vector3* glowColor=NULL);
     void removePartGroup(int group);
-    void addPartGroup(int group, int priority, std::vector<ESM::PartReference>& parts);
+    void addPartGroup(int group, int priority, const std::vector<ESM::PartReference> &parts,
+                                    bool enchantedGlow=false, Ogre::Vector3* glowColor=NULL);
 
-    void forceUpdate();
+    void applyAlpha(float alpha, Ogre::Entity* ent, NifOgre::ObjectScenePtr scene);
+
+public:
+    /**
+     * @param ptr
+     * @param node
+     * @param visibilityFlags
+     * @param disableListener  Don't listen for equipment changes and magic effects. InventoryStore only supports
+     *                         one listener at a time, so you shouldn't do this if creating several NpcAnimations
+     *                         for the same Ptr, eg preview dolls for the player.
+     *                         Those need to be manually rendered anyway.
+     * @param viewMode
+     */
+    NpcAnimation(const MWWorld::Ptr& ptr, Ogre::SceneNode* node, int visibilityFlags, bool disableListener = false,
+                 ViewMode viewMode=VM_Normal);
+    virtual ~NpcAnimation();
+
+    virtual void setWeaponGroup(const std::string& group) { mWeaponAnimationTime->setGroup(group); }
+
+    virtual Ogre::Vector3 runAnimation(float timepassed);
+
+    /// A relative factor (0-1) that decides if and how much the skeleton should be pitched
+    /// to indicate the facing orientation of the character.
+    virtual void setPitchFactor(float factor) { mPitchFactor = factor; }
+
+    virtual void showWeapons(bool showWeapon);
+    virtual void showCarriedLeft(bool showa);
+
+    virtual void attachArrow();
+    virtual void releaseArrow();
+
+    // WeaponAnimation
+    virtual NifOgre::ObjectScenePtr getWeapon() { return mObjectParts[ESM::PRT_Weapon]; }
+    virtual void showWeapon(bool show) { showWeapons(show); }
+    virtual void configureAddedObject(NifOgre::ObjectScenePtr object, MWWorld::Ptr ptr, int slot);
+
+    void setViewMode(ViewMode viewMode);
+
+    void updateParts();
+
+    /// \brief Applies a translation to the arms and hands.
+    /// This may be called multiple times before the animation
+    /// is updated to add additional offsets.
+    void addFirstPersonOffset(const Ogre::Vector3 &offset);
+
+    /// Rebuilds the NPC, updating their root model, animation sources, and equipment.
+    void rebuild();
+
+    /// Make the NPC only partially visible
+    virtual void setAlpha(float alpha);
+
+    /// Prepare this animation for being rendered with \a camera (rotates billboard nodes)
+    virtual void preRender (Ogre::Camera* camera);
 };
 
 }
+
 #endif

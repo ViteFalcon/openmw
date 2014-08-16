@@ -3,7 +3,7 @@
 
 #include "../mwrender/renderingmanager.hpp"
 
-#include "physicssystem.hpp"
+#include "ptr.hpp"
 #include "globals.hpp"
 
 namespace Ogre
@@ -21,6 +21,11 @@ namespace Files
     class Collections;
 }
 
+namespace Loading
+{
+    class Listener;
+}
+
 namespace Render
 {
     class OgreRenderer;
@@ -34,9 +39,9 @@ namespace MWRender
 
 namespace MWWorld
 {
+    class PhysicsSystem;
     class Player;
     class CellStore;
-    class Ptr;
 
     class Scene
     {
@@ -47,7 +52,7 @@ namespace MWWorld
         private:
 
             //OEngine::Render::OgreRenderer& mRenderer;
-            CellStore* mCurrentCell; // the cell, the player is in
+            CellStore* mCurrentCell; // the cell the player is in
             CellStoreCollection mActiveCells;
             bool mCellChanged;
             PhysicsSystem *mPhysics;
@@ -56,6 +61,7 @@ namespace MWWorld
             void playerCellChange (CellStore *cell, const ESM::Position& position,
                 bool adjustPlayerPos = true);
 
+            void insertCell (CellStore &cell, bool rescale, Loading::Listener* loadingListener);
 
         public:
 
@@ -65,11 +71,9 @@ namespace MWWorld
 
             void unloadCell (CellStoreCollection::iterator iter);
 
-            void loadCell (CellStore *cell);
+            void loadCell (CellStore *cell, Loading::Listener* loadingListener);
 
             void changeCell (int X, int Y, const ESM::Position& position, bool adjustPlayerPos);
-            ///< Move from exterior to interior or from interior cell to a different
-            /// interior cell.
 
             CellStore* getCurrentCell ();
 
@@ -84,11 +88,12 @@ namespace MWWorld
             void changeToExteriorCell (const ESM::Position& position);
             ///< Move to exterior cell.
 
+            void changeToVoid();
+            ///< Change into a void
+
             void markCellAsUnchanged();
 
-            void insertCell (Ptr::CellStore &cell);
-
-            void update (float duration);
+            void update (float duration, bool paused);
 
             void addObjectToScene (const Ptr& ptr);
             ///< Add an object that already exists in the world model to the scene.

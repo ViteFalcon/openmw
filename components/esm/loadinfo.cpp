@@ -1,17 +1,22 @@
 #include "loadinfo.hpp"
 
+#include "esmreader.hpp"
+#include "esmwriter.hpp"
+#include "defs.hpp"
+
 namespace ESM
 {
+    unsigned int DialInfo::sRecordId = REC_INFO;
 
 void DialInfo::load(ESMReader &esm)
 {
-    id = esm.getHNString("INAM");
-    prev = esm.getHNString("PNAM");
-    next = esm.getHNString("NNAM");
+    mPrev = esm.getHNString("PNAM");
+    mNext = esm.getHNString("NNAM");
 
     // Not present if deleted
-    if (esm.isNextSub("DATA"))
-        esm.getHT(data, 12);
+    if (esm.isNextSub("DATA")) {
+        esm.getHT(mData, 12);
+    }
 
     // What follows is somewhat spaghetti-ish, but it's worth if for
     // an extra speedup. INFO is by far the most common record type.
@@ -24,53 +29,53 @@ void DialInfo::load(ESMReader &esm)
 
     if (subName.val == REC_ONAM)
     {
-        actor = esm.getHString();
+        mActor = esm.getHString();
         if (esm.isEmptyOrGetName())
             return;
     }
     if (subName.val == REC_RNAM)
     {
-        race = esm.getHString();
+        mRace = esm.getHString();
         if (esm.isEmptyOrGetName())
             return;
     }
     if (subName.val == REC_CNAM)
     {
-        clas = esm.getHString();
+        mClass = esm.getHString();
         if (esm.isEmptyOrGetName())
             return;
     }
 
-    factionLess = false;
+    mFactionLess = false;
     if (subName.val == REC_FNAM)
     {
-        npcFaction = esm.getHString();
-        if (npcFaction == "FFFF")
-            factionLess = true;
+        mFaction = esm.getHString();
+        if (mFaction == "FFFF")
+            mFactionLess = true;
         if (esm.isEmptyOrGetName())
             return;
     }
     if (subName.val == REC_ANAM)
     {
-        cell = esm.getHString();
+        mCell = esm.getHString();
         if (esm.isEmptyOrGetName())
             return;
     }
     if (subName.val == REC_DNAM)
     {
-        pcFaction = esm.getHString();
+        mPcFaction = esm.getHString();
         if (esm.isEmptyOrGetName())
             return;
     }
     if (subName.val == REC_SNAM)
     {
-        sound = esm.getHString();
+        mSound = esm.getHString();
         if (esm.isEmptyOrGetName())
             return;
     }
     if (subName.val == REC_NAME)
     {
-        response = esm.getHString();
+        mResponse = esm.getHString();
         if (esm.isEmptyOrGetName())
             return;
     }
@@ -79,25 +84,11 @@ void DialInfo::load(ESMReader &esm)
     {
         SelectStruct ss;
 
-        ss.selectRule = esm.getHString();
-        esm.isEmptyOrGetName();
+        ss.mSelectRule = esm.getHString();
 
-        if (subName.val == REC_INTV)
-        {
-            ss.type = VT_Int;
-            esm.getHT(ss.i);
-        }
-        else if (subName.val == REC_FLTV)
-        {
-            ss.type = VT_Float;
-            esm.getHT(ss.f);
-        }
-        else
-            esm.fail(
-                    "INFO.SCVR must precede INTV or FLTV, not "
-                            + subName.toString());
+        ss.mValue.read (esm, Variant::Format_Info);
 
-        selects.push_back(ss);
+        mSelects.push_back(ss);
 
         if (esm.isEmptyOrGetName())
             return;
@@ -105,29 +96,85 @@ void DialInfo::load(ESMReader &esm)
 
     if (subName.val == REC_BNAM)
     {
-        resultScript = esm.getHString();
+        mResultScript = esm.getHString();
         if (esm.isEmptyOrGetName())
             return;
     }
 
-    questStatus = QS_None;
+    mQuestStatus = QS_None;
 
     if (subName.val == REC_QSTN)
-        questStatus = QS_Name;
+        mQuestStatus = QS_Name;
     else if (subName.val == REC_QSTF)
-        questStatus = QS_Finished;
+        mQuestStatus = QS_Finished;
     else if (subName.val == REC_QSTR)
-        questStatus = QS_Restart;
+        mQuestStatus = QS_Restart;
     else if (subName.val == REC_DELE)
-        questStatus = QS_Deleted;
+        mQuestStatus = QS_Deleted;
     else
         esm.fail(
                 "Don't know what to do with " + subName.toString()
-                        + " in INFO " + id);
+                        + " in INFO " + mId);
 
-    if (questStatus != QS_None)
+    if (mQuestStatus != QS_None)
         // Skip rest of record
         esm.skipRecord();
 }
 
+void DialInfo::save(ESMWriter &esm) const
+{
+    esm.writeHNCString("PNAM", mPrev);
+    esm.writeHNCString("NNAM", mNext);
+    esm.writeHNT("DATA", mData, 12);
+    esm.writeHNOCString("ONAM", mActor);
+    esm.writeHNOCString("RNAM", mRace);
+    esm.writeHNOCString("CNAM", mClass);
+    esm.writeHNOCString("FNAM", mFaction);
+    esm.writeHNOCString("ANAM", mCell);
+    esm.writeHNOCString("DNAM", mPcFaction);
+    esm.writeHNOCString("SNAM", mSound);
+    esm.writeHNOString("NAME", mResponse);
+
+    for (std::vector<SelectStruct>::const_iterator it = mSelects.begin(); it != mSelects.end(); ++it)
+    {
+        esm.writeHNString("SCVR", it->mSelectRule);
+        it->mValue.write (esm, Variant::Format_Info);
+    }
+
+    esm.writeHNOString("BNAM", mResultScript);
+
+    switch(mQuestStatus)
+    {
+    case QS_Name: esm.writeHNT("QSTN",'\1'); break;
+    case QS_Finished: esm.writeHNT("QSTF", '\1'); break;
+    case QS_Restart: esm.writeHNT("QSTR", '\1'); break;
+    case QS_Deleted: esm.writeHNT("DELE", '\1'); break;
+    default: break;
+    }
+}
+
+    void DialInfo::blank()
+    {
+        mData.mUnknown1 = 0;
+        mData.mDisposition = 0;
+        mData.mRank = 0;
+        mData.mGender = 0;
+        mData.mPCrank = 0;
+        mData.mUnknown2 = 0;
+
+        mSelects.clear();
+        mPrev.clear();
+        mNext.clear();
+        mActor.clear();
+        mRace.clear();
+        mClass.clear();
+        mFaction.clear();
+        mPcFaction.clear();
+        mCell.clear();
+        mSound.clear();
+        mResponse.clear();
+        mResultScript.clear();
+        mFactionLess = false;
+        mQuestStatus = QS_None;
+    }
 }

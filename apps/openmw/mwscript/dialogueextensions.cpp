@@ -2,6 +2,7 @@
 #include "dialogueextensions.hpp"
 
 #include <components/compiler/extensions.hpp>
+#include <components/compiler/opcodes.hpp>
 
 #include <components/interpreter/interpreter.hpp>
 #include <components/interpreter/runtime.hpp>
@@ -10,6 +11,9 @@
 #include "../mwbase/environment.hpp"
 #include "../mwbase/dialoguemanager.hpp"
 #include "../mwbase/journal.hpp"
+
+#include "../mwworld/class.hpp"
+#include "../mwmechanics/npcstats.hpp"
 
 #include "interpretercontext.hpp"
 #include "ref.hpp"
@@ -126,38 +130,83 @@ namespace MWScript
                 }
         };
 
-        const int opcodeJournal = 0x2000133;
-        const int opcodeSetJournalIndex = 0x2000134;
-        const int opcodeGetJournalIndex = 0x2000135;
-        const int opcodeAddTopic = 0x200013a;
-        const int opcodeChoice = 0x2000a;
-        const int opcodeForceGreeting = 0x200014f;
-        const int opcodeForceGreetingExplicit = 0x2000150;
-        const int opcodeGoodbye = 0x2000152;
-
-        void registerExtensions (Compiler::Extensions& extensions)
+        template<class R>
+        class OpModReputation : public Interpreter::Opcode0
         {
-            extensions.registerInstruction ("journal", "cl", opcodeJournal);
-            extensions.registerInstruction ("setjournalindex", "cl", opcodeSetJournalIndex);
-            extensions.registerFunction ("getjournalindex", 'l', "c", opcodeGetJournalIndex);
-            extensions.registerInstruction ("addtopic", "S" , opcodeAddTopic);
-            extensions.registerInstruction ("choice", "/SlSlSlSlSlSlSlSlSlSlSlSlSlSlSlSl", opcodeChoice);
-            extensions.registerInstruction("forcegreeting","",opcodeForceGreeting);
-            extensions.registerInstruction("forcegreeting","",opcodeForceGreeting,
-                opcodeForceGreetingExplicit);
-            extensions.registerInstruction("goodbye", "", opcodeGoodbye);
-        }
+            public:
+
+                virtual void execute (Interpreter::Runtime& runtime)
+                {
+                    MWWorld::Ptr ptr = R()(runtime);
+                    Interpreter::Type_Integer value = runtime[0].mInteger;
+                    runtime.pop();
+
+                    MWWorld::Class::get(ptr).getNpcStats (ptr).setReputation (MWWorld::Class::get(ptr).getNpcStats (ptr).getReputation () + value);
+                }
+        };
+
+        template<class R>
+        class OpSetReputation : public Interpreter::Opcode0
+        {
+            public:
+
+                virtual void execute (Interpreter::Runtime& runtime)
+                {
+                    MWWorld::Ptr ptr = R()(runtime);
+                    Interpreter::Type_Integer value = runtime[0].mInteger;
+                    runtime.pop();
+
+                    MWWorld::Class::get(ptr).getNpcStats (ptr).setReputation (value);
+                }
+        };
+
+        template<class R>
+        class OpGetReputation : public Interpreter::Opcode0
+        {
+            public:
+
+                virtual void execute (Interpreter::Runtime& runtime)
+                {
+                    MWWorld::Ptr ptr = R()(runtime);
+
+                    runtime.push (MWWorld::Class::get(ptr).getNpcStats (ptr).getReputation ());
+                }
+        };
+
+        template<class R>
+        class OpSameFaction : public Interpreter::Opcode0
+        {
+            public:
+
+                virtual void execute (Interpreter::Runtime& runtime)
+                {
+                    MWWorld::Ptr ptr = R()(runtime);
+
+                    MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayerPtr();
+
+                    runtime.push (MWWorld::Class::get(ptr).getNpcStats (ptr).isSameFaction (MWWorld::Class::get(player).getNpcStats (player)));
+                }
+        };
+
 
         void installOpcodes (Interpreter::Interpreter& interpreter)
         {
-            interpreter.installSegment5 (opcodeJournal, new OpJournal);
-            interpreter.installSegment5 (opcodeSetJournalIndex, new OpSetJournalIndex);
-            interpreter.installSegment5 (opcodeGetJournalIndex, new OpGetJournalIndex);
-            interpreter.installSegment5 (opcodeAddTopic, new OpAddTopic);
-            interpreter.installSegment3 (opcodeChoice,new OpChoice);
-            interpreter.installSegment5 (opcodeForceGreeting, new OpForceGreeting<ImplicitRef>);
-            interpreter.installSegment5 (opcodeForceGreetingExplicit, new OpForceGreeting<ExplicitRef>);
-            interpreter.installSegment5 (opcodeGoodbye, new OpGoodbye);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeJournal, new OpJournal);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeSetJournalIndex, new OpSetJournalIndex);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeGetJournalIndex, new OpGetJournalIndex);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeAddTopic, new OpAddTopic);
+            interpreter.installSegment3 (Compiler::Dialogue::opcodeChoice,new OpChoice);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeForceGreeting, new OpForceGreeting<ImplicitRef>);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeForceGreetingExplicit, new OpForceGreeting<ExplicitRef>);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeGoodbye, new OpGoodbye);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeGetReputation, new OpGetReputation<ImplicitRef>);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeSetReputation, new OpSetReputation<ImplicitRef>);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeModReputation, new OpModReputation<ImplicitRef>);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeSetReputationExplicit, new OpSetReputation<ExplicitRef>);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeModReputationExplicit, new OpModReputation<ExplicitRef>);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeGetReputationExplicit, new OpGetReputation<ExplicitRef>);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeSameFaction, new OpSameFaction<ImplicitRef>);
+            interpreter.installSegment5 (Compiler::Dialogue::opcodeSameFactionExplicit, new OpSameFaction<ExplicitRef>);
         }
     }
 

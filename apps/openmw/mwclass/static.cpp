@@ -5,6 +5,7 @@
 
 #include "../mwworld/ptr.hpp"
 #include "../mwworld/physicssystem.hpp"
+#include "../mwworld/cellstore.hpp"
 
 #include "../mwrender/objects.hpp"
 #include "../mwrender/renderinginterface.hpp"
@@ -15,27 +16,24 @@ namespace MWClass
     {
         const std::string model = getModel(ptr);
         if (!model.empty()) {
-            MWRender::Objects& objects = renderingInterface.getObjects();
-            objects.insertBegin(ptr, ptr.getRefData().isEnabled(), true);
-            objects.insertMesh(ptr, model);
+            renderingInterface.getObjects().insertModel(ptr, model);
         }
     }
 
     void Static::insertObject(const MWWorld::Ptr& ptr, MWWorld::PhysicsSystem& physics) const
     {
         const std::string model = getModel(ptr);
-        if(!model.empty()) {
-            physics.insertObjectPhysics(ptr, model);
-        }
+        if(!model.empty())
+            physics.addObject(ptr);
     }
-    
+
     std::string Static::getModel(const MWWorld::Ptr &ptr) const
     {
         MWWorld::LiveCellRef<ESM::Static> *ref =
             ptr.get<ESM::Static>();
-        assert(ref->base != NULL);
+        assert(ref->mBase != NULL);
 
-        const std::string &model = ref->base->model;
+        const std::string &model = ref->mBase->mModel;
         if (!model.empty()) {
             return "meshes\\" + model;
         }
@@ -60,6 +58,6 @@ namespace MWClass
         MWWorld::LiveCellRef<ESM::Static> *ref =
             ptr.get<ESM::Static>();
 
-        return MWWorld::Ptr(&cell.statics.insert(*ref), &cell);
+        return MWWorld::Ptr(&cell.get<ESM::Static>().insert(*ref), &cell);
     }
 }

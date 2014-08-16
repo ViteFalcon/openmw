@@ -10,6 +10,7 @@
 
 #include "opcodes.hpp"
 #include "runtime.hpp"
+#include "defines.hpp"
 
 namespace Interpreter
 {
@@ -47,9 +48,10 @@ namespace Interpreter
                     }
                     else if (c=='f' || c=='F' || c=='.')
                     {
-                        while (c!='f' && i<message.size())
+                        while (c!='f' && i+1<message.size())
                         {
                             ++i;
+                            c = message[i];
                         }
 
                         float value = runtime[0].mFloat;
@@ -69,7 +71,8 @@ namespace Interpreter
                 }
             }
         }
-
+        
+        formattedMessage = fixDefinesMsgBox(formattedMessage, runtime.getContext());
         return formattedMessage;
     }
 

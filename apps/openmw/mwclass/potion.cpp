@@ -11,13 +11,16 @@
 #include "../mwworld/actiontake.hpp"
 #include "../mwworld/actionapply.hpp"
 #include "../mwworld/cellstore.hpp"
+#include "../mwworld/containerstore.hpp"
 #include "../mwworld/physicssystem.hpp"
-#include "../mwworld/player.hpp"
+#include "../mwworld/nullaction.hpp"
 
 #include "../mwgui/tooltips.hpp"
 
 #include "../mwrender/objects.hpp"
 #include "../mwrender/renderinginterface.hpp"
+
+#include "../mwmechanics/npcstats.hpp"
 
 namespace MWClass
 {
@@ -25,27 +28,24 @@ namespace MWClass
     {
         const std::string model = getModel(ptr);
         if (!model.empty()) {
-            MWRender::Objects& objects = renderingInterface.getObjects();
-            objects.insertBegin(ptr, ptr.getRefData().isEnabled(), false);
-            objects.insertMesh(ptr, model);
+            renderingInterface.getObjects().insertModel(ptr, model);
         }
     }
 
     void Potion::insertObject(const MWWorld::Ptr& ptr, MWWorld::PhysicsSystem& physics) const
     {
         const std::string model = getModel(ptr);
-        if(!model.empty()) {
-            physics.insertObjectPhysics(ptr, model);
-        }
+        if(!model.empty())
+            physics.addObject(ptr,true);
     }
 
     std::string Potion::getModel(const MWWorld::Ptr &ptr) const
     {
         MWWorld::LiveCellRef<ESM::Potion> *ref =
             ptr.get<ESM::Potion>();
-        assert(ref->base != NULL);
+        assert(ref->mBase != NULL);
 
-        const std::string &model = ref->base->model;
+        const std::string &model = ref->mBase->mModel;
         if (!model.empty()) {
             return "meshes\\" + model;
         }
@@ -57,18 +57,13 @@ namespace MWClass
         MWWorld::LiveCellRef<ESM::Potion> *ref =
             ptr.get<ESM::Potion>();
 
-        return ref->base->name;
+        return ref->mBase->mName;
     }
 
     boost::shared_ptr<MWWorld::Action> Potion::activate (const MWWorld::Ptr& ptr,
         const MWWorld::Ptr& actor) const
     {
-    	boost::shared_ptr<MWWorld::Action> action(
-    	            new MWWorld::ActionTake (ptr));
-
-    	action->setSound (getUpSoundId(ptr));
-
-        return action;
+        return defaultItemActivate(ptr, actor);
     }
 
     std::string Potion::getScript (const MWWorld::Ptr& ptr) const
@@ -76,7 +71,7 @@ namespace MWClass
         MWWorld::LiveCellRef<ESM::Potion> *ref =
             ptr.get<ESM::Potion>();
 
-        return ref->base->script;
+        return ref->mBase->mScript;
     }
 
     int Potion::getValue (const MWWorld::Ptr& ptr) const
@@ -84,7 +79,7 @@ namespace MWClass
         MWWorld::LiveCellRef<ESM::Potion> *ref =
             ptr.get<ESM::Potion>();
 
-        return ref->base->data.value;
+        return ref->mBase->mData.mValue;
     }
 
     void Potion::registerSelf()
@@ -109,7 +104,7 @@ namespace MWClass
           MWWorld::LiveCellRef<ESM::Potion> *ref =
             ptr.get<ESM::Potion>();
 
-        return ref->base->icon;
+        return ref->mBase->mIcon;
     }
 
     bool Potion::hasToolTip (const MWWorld::Ptr& ptr) const
@@ -117,7 +112,7 @@ namespace MWClass
         MWWorld::LiveCellRef<ESM::Potion> *ref =
             ptr.get<ESM::Potion>();
 
-        return (ref->base->name != "");
+        return (ref->mBase->mName != "");
     }
 
     MWGui::ToolTipInfo Potion::getToolTipInfo (const MWWorld::Ptr& ptr) const
@@ -126,22 +121,39 @@ namespace MWClass
             ptr.get<ESM::Potion>();
 
         MWGui::ToolTipInfo info;
-        info.caption = ref->base->name + MWGui::ToolTips::getCountString(ptr.getRefData().getCount());
-        info.icon = ref->base->icon;
-
-        const ESMS::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
+        info.caption = ref->mBase->mName + MWGui::ToolTips::getCountString(ptr.getRefData().getCount());
+        info.icon = ref->mBase->mIcon;
 
         std::string text;
 
-        text += "\n" + store.gameSettings.search("sWeight")->str + ": " + MWGui::ToolTips::toString(ref->base->data.weight);
-        text += MWGui::ToolTips::getValueString(ref->base->data.value, store.gameSettings.search("sValue")->str);
+        text += "\n#{sWeight}: " + MWGui::ToolTips::toString(ref->mBase->mData.mWeight);
+        text += MWGui::ToolTips::getValueString(getValue(ptr), "#{sValue}");
 
-        info.effects = MWGui::Widgets::MWEffectList::effectListFromESM(&ref->base->effects);
+        info.effects = MWGui::Widgets::MWEffectList::effectListFromESM(&ref->mBase->mEffects);
+
+        // hide effects the player doesnt know about
+        MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayerPtr();
+        MWMechanics::NpcStats& npcStats = MWWorld::Class::get(player).getNpcStats (player);
+        int alchemySkill = npcStats.getSkill (ESM::Skill::Alchemy).getBase();
+        int i=0;
+        static const float fWortChanceValue =
+                MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fWortChanceValue")->getFloat();
+        for (MWGui::Widgets::SpellEffectList::iterator it = info.effects.begin(); it != info.effects.end(); ++it)
+        {
+            it->mKnown = ( (i == 0 && alchemySkill >= fWortChanceValue)
+                 || (i == 1 && alchemySkill >= fWortChanceValue*2)
+                 || (i == 2 && alchemySkill >= fWortChanceValue*3)
+                 || (i == 3 && alchemySkill >= fWortChanceValue*4));
+
+            ++i;
+        }
+
         info.isPotion = true;
 
         if (MWBase::Environment::get().getWindowManager()->getFullHelp()) {
-            text += MWGui::ToolTips::getMiscString(ref->ref.owner, "Owner");
-            text += MWGui::ToolTips::getMiscString(ref->base->script, "Script");
+            text += MWGui::ToolTips::getMiscString(ref->mRef.mOwner, "Owner");
+            text += MWGui::ToolTips::getMiscString(ref->mRef.mFaction, "Faction");
+            text += MWGui::ToolTips::getMiscString(ref->mBase->mScript, "Script");
         }
 
         info.text = text;
@@ -154,12 +166,13 @@ namespace MWClass
         MWWorld::LiveCellRef<ESM::Potion> *ref =
             ptr.get<ESM::Potion>();
 
-        ptr.getRefData().setCount (ptr.getRefData().getCount()-1);
+        MWWorld::Ptr actor = MWBase::Environment::get().getWorld()->getPlayerPtr();
 
-        MWWorld::Ptr actor = MWBase::Environment::get().getWorld()->getPlayer().getPlayer();
+        // remove used potion (assume it is present in inventory)
+        ptr.getContainerStore()->remove(ptr, 1, actor);
 
         boost::shared_ptr<MWWorld::Action> action (
-            new MWWorld::ActionApply (actor, ref->base->mId));
+            new MWWorld::ActionApply (actor, ref->mBase->mId));
 
         action->setSound ("Drink");
 
@@ -172,6 +185,18 @@ namespace MWClass
         MWWorld::LiveCellRef<ESM::Potion> *ref =
             ptr.get<ESM::Potion>();
 
-        return MWWorld::Ptr(&cell.potions.insert(*ref), &cell);
+        return MWWorld::Ptr(&cell.get<ESM::Potion>().insert(*ref), &cell);
+    }
+
+    bool Potion::canSell (const MWWorld::Ptr& item, int npcServices) const
+    {
+        return npcServices & ESM::NPC::Potions;
+    }
+
+    float Potion::getWeight(const MWWorld::Ptr &ptr) const
+    {
+        MWWorld::LiveCellRef<ESM::Potion> *ref =
+            ptr.get<ESM::Potion>();
+        return ref->mBase->mData.mWeight;
     }
 }

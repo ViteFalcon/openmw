@@ -24,8 +24,8 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ------------------------------------------------------- */
 
-#ifndef _Control_H_
-#define _Control_H_
+#ifndef OICS_Control_H_
+#define OICS_Control_H_
 
 #include "ICSPrerequisites.h"
 
@@ -35,7 +35,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 namespace ICS
 {
 	
-	class DllExport Control
+    class DllExport Control
 	{
 	public:
 
@@ -44,7 +44,7 @@ namespace ICS
 			DECREASE = -1, STOP = 0, INCREASE = 1
 		};
 
-		Control(const std::string name, bool autoChangeDirectionOnLimitsAfterStop = false, bool autoReverseToInitialValue = false, float initialValue = 0.5, float stepSize = 0.1, float stepsPerSeconds = 2.0, bool axisBindable = true); 
+        Control(const std::string& name, bool autoChangeDirectionOnLimitsAfterStop = false, bool autoReverseToInitialValue = false, float initialValue = 0.5, float stepSize = 0.1, float stepsPerSeconds = 2.0, bool axisBindable = true);
 		~Control();
 
 		void setChangingDirection(ControlChangingDirection direction);

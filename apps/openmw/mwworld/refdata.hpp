@@ -14,10 +14,15 @@ namespace ESM
 {
     class Script;
     class CellRef;
+    struct ObjectState;
 }
 
 namespace MWWorld
 {
+    struct LocalRotation{
+        float rot[3];
+    };
+
     class CustomData;
 
     class RefData
@@ -34,6 +39,8 @@ namespace MWWorld
 
             ESM::Position mPosition;
 
+            LocalRotation mLocalRotation;
+
             CustomData *mCustomData;
 
             void copy (const RefData& refData);
@@ -42,19 +49,29 @@ namespace MWWorld
 
         public:
 
+            RefData();
+
             /// @param cellRef Used to copy constant data such as position into this class where it can
             /// be altered without effecting the original data. This makes it possible
             /// to reset the position as the orignal data is still held in the CellRef
             RefData (const ESM::CellRef& cellRef);
 
+            RefData (const ESM::ObjectState& objectState);
+            ///< Ignores local variables and custom data (not enough context available here to
+            /// perform these operations).
+
             RefData (const RefData& refData);
 
             ~RefData();
 
+            void write (ESM::ObjectState& objectState, const std::string& scriptId = "") const;
+            ///< Ignores custom data (not enough context available here to
+            /// perform this operations).
+
             RefData& operator= (const RefData& refData);
 
             /// Return OGRE handle (may be empty).
-            std::string getHandle();
+            const std::string &getHandle();
 
             /// Return OGRE base node (can be a null pointer).
             Ogre::SceneNode* getBaseNode();
@@ -67,6 +84,11 @@ namespace MWWorld
             void setLocals (const ESM::Script& script);
 
             void setCount (int count);
+            /// Set object count (an object pile is a simple object with a count >1).
+            ///
+            /// \warning Do not call setCount() to add or remove objects from a
+            /// container or an actor's inventory. Call ContainerStore::add() or
+            /// ContainerStore::remove() instead.
 
             MWScript::Locals& getLocals();
 
@@ -77,6 +99,8 @@ namespace MWWorld
             void disable();
 
             ESM::Position& getPosition();
+
+            LocalRotation& getLocalRotation();
 
             void setCustomData (CustomData *data);
             ///< Set custom data (potentially replacing old custom data). The ownership of \æ data is

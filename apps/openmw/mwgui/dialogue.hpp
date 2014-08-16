@@ -1,11 +1,12 @@
 #ifndef MWGUI_DIALOGE_H
 #define MWGUI_DIALOGE_H
 
-#include "window_base.hpp"
+#include "windowbase.hpp"
 #include "referenceinterface.hpp"
-#include <boost/array.hpp>
 
-#include "../mwworld/ptr.hpp"
+#include "bookpage.hpp"
+
+#include "keywordsearch.hpp"
 
 namespace MWGui
 {
@@ -24,61 +25,152 @@ namespace MWGui
 
 namespace MWGui
 {
-    class DialogueHistory;
+    class DialogueHistoryViewModel;
+    class BookPage;
+
+    class PersuasionDialog : public WindowModal
+    {
+    public:
+        PersuasionDialog();
+
+        virtual void open();
+
+    private:
+        MyGUI::Button* mCancelButton;
+        MyGUI::Button* mAdmireButton;
+        MyGUI::Button* mIntimidateButton;
+        MyGUI::Button* mTauntButton;
+        MyGUI::Button* mBribe10Button;
+        MyGUI::Button* mBribe100Button;
+        MyGUI::Button* mBribe1000Button;
+        MyGUI::TextBox* mGoldLabel;
+
+        void onCancel (MyGUI::Widget* sender);
+        void onPersuade (MyGUI::Widget* sender);
+    };
+
+
+    struct Link
+    {
+        virtual ~Link() {}
+        virtual void activated () = 0;
+    };
+
+    struct Topic : Link
+    {
+        Topic(const std::string& id) : mTopicId(id) {}
+        std::string mTopicId;
+        virtual void activated ();
+    };
+
+    struct Choice : Link
+    {
+        Choice(int id) : mChoiceId(id) {}
+        int mChoiceId;
+        virtual void activated ();
+    };
+
+    struct Goodbye : Link
+    {
+        virtual void activated ();
+    };
+
+    typedef KeywordSearch <std::string, intptr_t> KeywordSearchT;
+
+    struct DialogueText
+    {
+        virtual ~DialogueText() {}
+        virtual void write (BookTypesetter::Ptr typesetter, KeywordSearchT* keywordSearch, std::map<std::string, Link*>& topicLinks) const = 0;
+        std::string mText;
+    };
+
+    struct Response : DialogueText
+    {
+        Response(const std::string& text, const std::string& title = "");
+        virtual void write (BookTypesetter::Ptr typesetter, KeywordSearchT* keywordSearch, std::map<std::string, Link*>& topicLinks) const;
+        void addTopicLink (BookTypesetter::Ptr typesetter, intptr_t topicId, size_t begin, size_t end) const;
+        std::string mTitle;
+    };
+
+    struct Message : DialogueText
+    {
+        Message(const std::string& text);
+        virtual void write (BookTypesetter::Ptr typesetter, KeywordSearchT* keywordSearch, std::map<std::string, Link*>& topicLinks) const;
+    };
 
     class DialogueWindow: public WindowBase, public ReferenceInterface
     {
     public:
-        DialogueWindow(MWBase::WindowManager& parWindowManager);
+        DialogueWindow();
 
         // Events
         typedef MyGUI::delegates::CMultiDelegate0 EventHandle_Void;
 
-        /** Event : Dialog finished, OK button clicked.\n
-            signature : void method()\n
-        */
-        EventHandle_Void eventBye;
+        void notifyLinkClicked (TypesetBook::InteractiveId link);
 
         void startDialogue(MWWorld::Ptr actor, std::string npcName);
-        void stopDialogue();
         void setKeywords(std::list<std::string> keyWord);
-        void removeKeyword(std::string keyWord);
-        void addText(std::string text);
-        void addTitle(std::string text);
-        void askQuestion(std::string question);
-        void goodbye();
 
-        // various service button visibilities, depending if the npc/creature talked to has these services
+        void addResponse (const std::string& text, const std::string& title="");
+
+        void addMessageBox(const std::string& text);
+
+        void addChoice(const std::string& choice, int id);
+        void clearChoices();
+
+        void goodbye();
+        void onFrame();
+
         // make sure to call these before setKeywords()
-        void setShowTrade(bool show) { mShowTrade = show; }
-        void setShowSpells(bool show) { mShowSpells = show; }
+        void setServices(int services) { mServices = services; }
+
+        enum Services
+        {
+            Service_Trade = 0x01,
+            Service_BuySpells = 0x02,
+            Service_CreateSpells = 0x04,
+            Service_Enchant = 0x08,
+            Service_Training = 0x10,
+            Service_Travel = 0x20,
+            Service_Repair = 0x40
+        };
 
     protected:
-        void onSelectTopic(std::string topic);
+        void onSelectTopic(const std::string& topic, int id);
         void onByeClicked(MyGUI::Widget* _sender);
-        void onHistoryClicked(MyGUI::Widget* _sender);
         void onMouseWheel(MyGUI::Widget* _sender, int _rel);
         void onWindowResize(MyGUI::Window* _sender);
+
+        void onScrollbarMoved (MyGUI::ScrollBar* sender, size_t pos);
+
+        void updateHistory(bool scrollbar=false);
 
         virtual void onReferenceUnavailable();
 
     private:
         void updateOptions();
-        /**
-        *Helper function that add topic keyword in blue in a text.
-        */
-        std::string parseText(std::string text);
 
-        // various service button visibilities, depending if the npc/creature talked to has these services
-        bool mShowTrade;
-        bool mShowSpells;
+        int mServices;
 
         bool mEnabled;
 
-        DialogueHistory*   mHistory;
+        bool mGoodbye;
+
+        std::vector<DialogueText*> mHistoryContents;
+        std::map<std::string, int> mChoices;
+
+        std::vector<Link*> mLinks;
+        std::map<std::string, Link*> mTopicLinks;
+
+        KeywordSearchT mKeywordSearch;
+
+        BookPage* mHistory;
         Widgets::MWList*   mTopicsList;
+        MyGUI::ScrollBar* mScrollBar;
         MyGUI::ProgressPtr mDispositionBar;
-        MyGUI::EditPtr     mDispositionText;
+        MyGUI::EditBox*     mDispositionText;
+
+        PersuasionDialog mPersuasionDialog;
     };
 }
 #endif

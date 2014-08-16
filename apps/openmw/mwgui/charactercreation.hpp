@@ -1,12 +1,11 @@
 #ifndef CHARACTER_CREATION_HPP
 #define CHARACTER_CREATION_HPP
 
-#include <components/esm_store/store.hpp>
+#include <components/esm/loadskil.hpp>
+#include <components/esm/loadclas.hpp>
 
 #include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
-
-#include "../mwmechanics/stat.hpp"
 
 namespace MWGui
 {
@@ -29,22 +28,17 @@ namespace MWGui
     public:
     typedef std::vector<int> SkillList;
 
-    CharacterCreation(MWBase::WindowManager* _wm);
+    CharacterCreation();
     ~CharacterCreation();
 
     //Show a dialog
     void spawnDialog(const char id);
 
-    void setPlayerHealth (const MWMechanics::DynamicStat<float>& value);
-
-    void setPlayerMagicka (const MWMechanics::DynamicStat<float>& value);
-
-    void setPlayerFatigue (const MWMechanics::DynamicStat<float>& value);
-
-    void setValue (const std::string& id, const MWMechanics::Stat<int>& value);
+    void setValue (const std::string& id, const MWMechanics::AttributeValue& value);
     void setValue (const std::string& id, const MWMechanics::DynamicStat<float>& value);
-    void setValue(const ESM::Skill::SkillEnum parSkill, const MWMechanics::Stat<float>& value);
+    void setValue(const ESM::Skill::SkillEnum parSkill, const MWMechanics::SkillValue& value);
     void configureSkills (const SkillList& major, const SkillList& minor);
+    void doRenderUpdate();
 
     private:
     //Dialogs
@@ -58,16 +52,11 @@ namespace MWGui
     BirthDialog* mBirthSignDialog;
     ReviewDialog* mReviewDialog;
 
-    MWBase::WindowManager* mWM;
-
     //Player data
     std::string mPlayerName;
     std::string mPlayerRaceId;
     std::string mPlayerBirthSignId;
     ESM::Class mPlayerClass;
-    MWMechanics::DynamicStat<float> mPlayerHealth;
-    MWMechanics::DynamicStat<float> mPlayerMagicka;
-    MWMechanics::DynamicStat<float> mPlayerFatigue;
 
     //Class generation vars
     unsigned mGenerateClassStep;                 // Keeps track of current step in Generate Class dialog
@@ -109,6 +98,7 @@ namespace MWGui
         CSE_RaceChosen,
         CSE_ClassChosen,
         CSE_BirthSignChosen,
+        CSE_ReviewBack,
         CSE_ReviewNext
     };
 

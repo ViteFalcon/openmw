@@ -1,11 +1,12 @@
-#ifndef _MWINPUT_MWINPUTMANAGERIMP_H
-#define _MWINPUT_MWINPUTMANAGERIMP_H
+#ifndef MWINPUT_MWINPUTMANAGERIMP_H
+#define MWINPUT_MWINPUTMANAGERIMP_H
 
 #include "../mwgui/mode.hpp"
 
 #include <components/settings/settings.hpp>
 
 #include "../mwbase/inputmanager.hpp"
+#include <extern/sdl4ogre/sdlinputwrapper.hpp>
 
 namespace OEngine
 {
@@ -35,15 +36,10 @@ namespace ICS
     class InputControlSystem;
 }
 
-namespace OIS
+namespace MyGUI
 {
-    class Keyboard;
-    class Mouse;
-    class InputManager;
+    class MouseButton;
 }
-
-#include <OIS/OISKeyboard.h>
-#include <OIS/OISMouse.h>
 
 #include <extern/oics/ICSChannelListener.h>
 #include <extern/oics/ICSInputControlSystem.h>
@@ -54,19 +50,27 @@ namespace MWInput
     /**
     * @brief Class that handles all input and key bindings for OpenMW.
     */
-    class InputManager : public MWBase::InputManager, public OIS::KeyListener, public OIS::MouseListener, public ICS::ChannelListener, public ICS::DetectingBindingListener
+    class InputManager :
+            public MWBase::InputManager,
+            public SFO::KeyListener,
+            public SFO::MouseListener,
+            public SFO::WindowListener,
+            public ICS::ChannelListener,
+            public ICS::DetectingBindingListener
     {
     public:
         InputManager(OEngine::Render::OgreRenderer &_ogre,
-            MWWorld::Player&_player,
-            MWBase::WindowManager &_windows,
-            bool debug,
             OMW::Engine& engine,
-            const std::string& userFile, bool userFileExists);
+            const std::string& userFile, bool userFileExists, bool grab);
 
         virtual ~InputManager();
 
-        virtual void update(float dt, bool loading);
+        /// Clear all savegame-specific data
+        virtual void clear();
+
+        virtual void update(float dt, bool disableControls, bool disableEvents=false);
+
+        void setPlayer (MWWorld::Player* player) { mPlayer = player; }
 
         virtual void changeInputMode(bool guiMode);
 
@@ -85,12 +89,18 @@ namespace MWInput
         virtual void resetToDefaultBindings();
 
     public:
-        virtual bool keyPressed( const OIS::KeyEvent &arg );
-        virtual bool keyReleased( const OIS::KeyEvent &arg );
+        virtual void keyPressed(const SDL_KeyboardEvent &arg );
+        virtual void keyReleased( const SDL_KeyboardEvent &arg );
+        virtual void textInput (const SDL_TextInputEvent &arg);
 
-        virtual bool mousePressed( const OIS::MouseEvent &arg, OIS::MouseButtonID id );
-        virtual bool mouseReleased( const OIS::MouseEvent &arg, OIS::MouseButtonID id );
-        virtual bool mouseMoved( const OIS::MouseEvent &arg );
+        virtual void mousePressed( const SDL_MouseButtonEvent &arg, Uint8 id );
+        virtual void mouseReleased( const SDL_MouseButtonEvent &arg, Uint8 id );
+        virtual void mouseMoved( const SFO::MouseMotionEvent &arg );
+
+        virtual void windowVisibilityChange( bool visible );
+        virtual void windowFocusChange( bool have_focus );
+        virtual void windowResized (int x, int y);
+        virtual void windowClosed ();
 
         virtual void channelChanged(ICS::Channel* channel, float currentValue, float previousValue);
 
@@ -98,7 +108,7 @@ namespace MWInput
             , ICS::InputControlSystem::NamedAxis axis, ICS::Control::ControlChangingDirection direction);
 
         virtual void keyBindingDetected(ICS::InputControlSystem* ICS, ICS::Control* control
-            , OIS::KeyCode key, ICS::Control::ControlChangingDirection direction);
+            , SDL_Keycode key, ICS::Control::ControlChangingDirection direction);
 
         virtual void mouseButtonBindingDetected(ICS::InputControlSystem* ICS, ICS::Control* control
             , unsigned int button, ICS::Control::ControlChangingDirection direction);
@@ -119,39 +129,44 @@ namespace MWInput
 
     private:
         OEngine::Render::OgreRenderer &mOgre;
-        MWWorld::Player &mPlayer;
-        MWBase::WindowManager &mWindows;
+        MWWorld::Player* mPlayer;
         OMW::Engine& mEngine;
 
-        ICS::InputControlSystem* mInputCtrl;
+        ICS::InputControlSystem* mInputBinder;
 
-        OIS::Keyboard* mKeyboard;
-        OIS::Mouse* mMouse;
-        OIS::InputManager* mInputManager;
+
+        SFO::InputWrapper* mInputManager;
 
         std::string mUserFile;
 
         bool mDragDrop;
+
+        bool mGrabCursor;
 
         bool mInvertY;
 
         float mCameraSensitivity;
         float mUISensitivity;
         float mCameraYMultiplier;
-        float mUIYMultiplier;
         float mPreviewPOVDelay;
         float mTimeIdle;
 
         bool mMouseLookEnabled;
         bool mGuiCursorEnabled;
 
+        float mOverencumberedMessageDelay;
+
         float mMouseX;
         float mMouseY;
+        int mMouseWheel;
+        bool mUserFileExists;
+        bool mAlwaysRunActive;
 
         std::map<std::string, bool> mControlSwitch;
 
     private:
         void adjustMouseRegion(int width, int height);
+        MyGUI::MouseButton sdlButtonToMyGUI(Uint8 button);
 
         void resetIdleTime();
         void updateIdleTime(float dt);
@@ -167,7 +182,6 @@ namespace MWInput
         void activate();
         void toggleWalking();
         void toggleAutoMove();
-        void exitNow();
         void rest();
 
         void quickKey (int index);
@@ -184,7 +198,7 @@ namespace MWInput
 
             A_GameMenu,
 
-            A_Quit,           // Exit the program
+            A_Unused,
 
             A_Screenshot,     // Take a screenshot
 
@@ -206,14 +220,14 @@ namespace MWInput
             A_Journal,    //Journal
             A_Weapon,     //Draw/Sheath weapon
             A_Spell,      //Ready/Unready Casting
-            A_AlwaysRun,  //Toggle Always Run
+            A_Run,        //Run when held
             A_CycleSpellLeft, //cycling through spells
             A_CycleSpellRight,
             A_CycleWeaponLeft,//Cycling through weapons
             A_CycleWeaponRight,
-            A_ToggleSneak,    //Toggles Sneak, add Push-Sneak later
-            A_ToggleWalk, //Toggle Walking/Running
-            A_Crouch,
+            A_ToggleSneak,    //Toggles Sneak
+            A_AlwaysRun, //Toggle Walking/Running
+            A_Sneak,
 
             A_QuickSave,
             A_QuickLoad,

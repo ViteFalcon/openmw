@@ -3,55 +3,62 @@
 
 #include "../mwbase/dialoguemanager.hpp"
 
-#include <components/esm/loadinfo.hpp>
+#include <map>
+#include <list>
 
 #include <components/compiler/streamerrorhandler.hpp>
-#include "../mwscript/compilercontext.hpp"
-#include "../mwscript/interpretercontext.hpp"
-#include <components/compiler/output.hpp>
+#include <components/translation/translation.hpp>
 
 #include "../mwworld/ptr.hpp"
 
-#include <map>
+#include "../mwscript/compilercontext.hpp"
+
+namespace ESM
+{
+    struct Dialogue;
+}
 
 namespace MWDialogue
 {
     class DialogueManager : public MWBase::DialogueManager
     {
-            bool isMatching (const MWWorld::Ptr& actor, const ESM::DialInfo::SelectStruct& select) const;
-
-            bool isMatching (const MWWorld::Ptr& actor, const ESM::DialInfo& info) const;
-
-            bool functionFilter(const MWWorld::Ptr& actor, const ESM::DialInfo& info,bool choice);
-
-            void parseText(std::string text);
-
-            void updateTopics();
-
-            std::map<std::string,ESM::Dialogue> mDialogueMap;
-            std::map<std::string,bool> mKnownTopics;// Those are the topics the player knows.
+            std::map<std::string, ESM::Dialogue> mDialogueMap;
+            std::map<std::string, bool> mKnownTopics;// Those are the topics the player knows.
             std::list<std::string> mActorKnownTopics;
 
+            Translation::Storage& mTranslationDataStorage;
             MWScript::CompilerContext mCompilerContext;
             std::ostream mErrorStream;
             Compiler::StreamErrorHandler mErrorHandler;
 
-
-            bool compile (const std::string& cmd,std::vector<Interpreter::Type_Code>& code);
-            void executeScript(std::string script);
             MWWorld::Ptr mActor;
-
-            void printError(std::string error);
+            bool mTalkedTo;
 
             int mChoice;
-            std::map<std::string,int> mChoiceMap;
             std::string mLastTopic;
-            ESM::DialInfo mLastDialogue;
             bool mIsInChoice;
+
+            float mTemporaryDispositionChange;
+            float mPermanentDispositionChange;
+            bool mScriptVerbose;
+
+            void parseText (const std::string& text);
+
+            void updateTopics();
+            void updateGlobals();
+
+            bool compile (const std::string& cmd,std::vector<Interpreter::Type_Code>& code);
+            void executeScript (const std::string& script);
+
+            void executeTopic (const std::string& topic);
 
         public:
 
-            DialogueManager (const Compiler::Extensions& extensions);
+            DialogueManager (const Compiler::Extensions& extensions, bool scriptVerbose, Translation::Storage& translationDataStorage);
+
+            virtual void clear();
+
+            virtual bool isInChoice() const;
 
             virtual void startDialogue (const MWWorld::Ptr& actor);
 
@@ -61,15 +68,43 @@ namespace MWDialogue
 
             virtual void goodbye();
 
-            ///get the faction of the actor you are talking with
-            virtual std::string getFaction() const;
+            virtual MWWorld::Ptr getActor() const;
+            ///< Return the actor the player is currently talking to.
+
+            virtual bool checkServiceRefused ();
+
+            virtual void say(const MWWorld::Ptr &actor, const std::string &topic) const;
 
             //calbacks for the GUI
             virtual void keywordSelected (const std::string& keyword);
             virtual void goodbyeSelected();
-            virtual void questionAnswered (const std::string& answer);
+            virtual void questionAnswered (int answer);
 
+            virtual void persuade (int type);
+            virtual int getTemporaryDispositionChange () const;
+            virtual void applyDispositionChange (int delta);
+
+            virtual int countSavedGameRecords() const;
+
+            virtual void write (ESM::ESMWriter& writer) const;
+
+            virtual void readRecord (ESM::ESMReader& reader, int32_t type);
     };
+
+
+    struct HyperTextToken
+    {
+        HyperTextToken(const std::string& text, bool link) : mText(text), mLink(link) {}
+
+        std::string mText;
+        bool mLink;
+    };
+
+    // In translations (at least Russian) the links are marked with @#, so
+    // it should be a function to parse it
+    std::vector<HyperTextToken> ParseHyperText(const std::string& text);
+
+    size_t RemovePseudoAsterisks(std::string& phrase);
 }
 
 #endif

@@ -1,10 +1,16 @@
-#ifndef _ESM_SCPT_H
-#define _ESM_SCPT_H
+#ifndef OPENMW_ESM_SCPT_H
+#define OPENMW_ESM_SCPT_H
 
-#include "esm_reader.hpp"
+#include <string>
+#include <vector>
+
+#include "esmcommon.hpp"
 
 namespace ESM
 {
+
+class ESMReader;
+class ESMWriter;
 
 /*
  * Script definitions
@@ -13,6 +19,8 @@ namespace ESM
 class Script
 {
 public:
+    static unsigned int sRecordId;
+
     struct SCHDstruct
     {
         /* Script name.
@@ -36,20 +44,24 @@ public:
          approach though.
          */
 
-        NAME32 name;
-
         // These describe the sizes we need to allocate for the script
         // data.
-        int numShorts, numLongs, numFloats, scriptDataSize, stringTableSize;
+        int mNumShorts, mNumLongs, mNumFloats, mScriptDataSize, mStringTableSize;
     }; // 52 bytes
 
-    SCHDstruct data;
+    std::string mId;
 
-    std::vector<std::string> varNames; // Variable names
-    std::vector<char> scriptData; // Compiled bytecode
-    std::string scriptText; // Uncompiled script
+    SCHDstruct mData;
+
+    std::vector<std::string> mVarNames; // Variable names
+    std::vector<unsigned char> mScriptData; // Compiled bytecode
+    std::string mScriptText; // Uncompiled script
 
     void load(ESMReader &esm);
+    void save(ESMWriter &esm) const;
+
+    void blank();
+    ///< Set record to default state (does not touch the ID/index).
 };
 }
 #endif

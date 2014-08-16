@@ -1,25 +1,3 @@
-/**
- *  Open Morrowind - an opensource Elder Scrolls III: Morrowind
- *  engine implementation.
- *
- *  Copyright (C) 2011 Open Morrowind Team
- *
- *  This program is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
- */
-
-/** \file components/files/macospath.cpp */
-
 #include "macospath.hpp"
 
 #if defined(macintosh) || defined(Macintosh) || defined(__APPLE__) || defined(__MACH__)
@@ -33,9 +11,26 @@
  * FIXME: Someone with MacOS system should check this and correct if necessary
  */
 
-/**
- * \namespace Files
- */
+namespace
+{
+    boost::filesystem::path getUserHome()
+    {
+        const char* dir = getenv("HOME");
+        if (dir == NULL)
+        {
+            struct passwd* pwd = getpwuid(getuid());
+            if (pwd != NULL)
+            {
+                dir = pwd->pw_dir;
+            }
+        }
+        if (dir == NULL)
+            return boost::filesystem::path();
+        else
+            return boost::filesystem::path(dir);
+    }
+}
+
 namespace Files
 {
 
@@ -44,28 +39,24 @@ MacOsPath::MacOsPath(const std::string& application_name)
 {
 }
 
-boost::filesystem::path MacOsPath::getUserPath() const
+boost::filesystem::path MacOsPath::getUserConfigPath() const
 {
-    boost::filesystem::path userPath(".");
-
-    const char* theDir = getenv("HOME");
-    if (theDir == NULL)
-    {
-        struct passwd* pwd = getpwuid(getuid());
-        if (pwd != NULL)
-        {
-            theDir = pwd->pw_dir;
-        }
-    }
-    if (theDir != NULL)
-    {
-        userPath = boost::filesystem::path(theDir) / "Library/Preferences/";
-    }
+    boost::filesystem::path userPath (getUserHome());
+    userPath /= "Library/Preferences/";
 
     return userPath / mName;
 }
 
-boost::filesystem::path MacOsPath::getGlobalPath() const
+boost::filesystem::path MacOsPath::getUserDataPath() const
+{
+    // TODO: probably wrong?
+    boost::filesystem::path userPath (getUserHome());
+    userPath /= "Library/Preferences/";
+
+    return userPath / mName;
+}
+
+boost::filesystem::path MacOsPath::getGlobalConfigPath() const
 {
     boost::filesystem::path globalPath("/Library/Preferences/");
     return globalPath / mName;
@@ -73,23 +64,9 @@ boost::filesystem::path MacOsPath::getGlobalPath() const
 
 boost::filesystem::path MacOsPath::getCachePath() const
 {
-    boost::filesystem::path userPath(".");
-
-    const char* theDir = getenv("HOME");
-    if (theDir == NULL)
-    {
-        struct passwd* pwd = getpwuid(getuid());
-        if (pwd != NULL)
-        {
-            theDir = pwd->pw_dir;
-        }
-    }
-    if (theDir != NULL)
-    {
-        userPath = boost::filesystem::path(theDir) / "Library/Caches" / mName;
-    }
-
-    return userPath;
+    boost::filesystem::path userPath (getUserHome());
+    userPath /= "Library/Caches";
+    return userPath / mName;
 }
 
 boost::filesystem::path MacOsPath::getLocalPath() const
@@ -107,17 +84,9 @@ boost::filesystem::path MacOsPath::getInstallPath() const
 {
     boost::filesystem::path installPath;
 
-    char *homePath = getenv("HOME");
-    if (homePath == NULL)
-    {
-        struct passwd* pwd = getpwuid(getuid());
-        if (pwd != NULL)
-        {
-            homePath = pwd->pw_dir;
-        }
-    }
+    boost::filesystem::path homePath = getUserHome();
 
-    if (homePath != NULL)
+    if (!homePath.empty())
     {
         boost::filesystem::path wineDefaultRegistry(homePath);
         wineDefaultRegistry /= ".wine/system.reg";

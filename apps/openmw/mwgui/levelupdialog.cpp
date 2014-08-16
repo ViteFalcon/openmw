@@ -6,25 +6,25 @@
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 
-#include "../mwworld/player.hpp"
 #include "../mwworld/class.hpp"
+#include "../mwworld/fallback.hpp"
+#include "../mwworld/esmstore.hpp"
+#include "../mwworld/cellstore.hpp"
 
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/npcstats.hpp"
-#include "../mwmechanics/stat.hpp"
-
-#include <components/esm_store/reclists.hpp>
-#include <components/esm_store/store.hpp>
 
 namespace MWGui
 {
 
-    LevelupDialog::LevelupDialog(MWBase::WindowManager &parWindowManager)
-        : WindowBase("openmw_levelup_dialog.layout", parWindowManager)
+    LevelupDialog::LevelupDialog()
+        : WindowBase("openmw_levelup_dialog.layout")
     {
         getWidget(mOkButton, "OkButton");
         getWidget(mClassImage, "ClassImage");
         getWidget(mLevelText, "LevelText");
+        getWidget(mLevelDescription, "LevelDescription");
+        getWidget(mCoinBox, "Coins");
 
         mOkButton->eventMouseButtonClick += MyGUI::newDelegate(this, &LevelupDialog::onOkButtonClicked);
 
@@ -60,7 +60,7 @@ namespace MWGui
 
     void LevelupDialog::setAttributeValues()
     {
-        MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayer().getPlayer();
+        MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayerPtr();
         MWMechanics::CreatureStats& creatureStats = MWWorld::Class::get(player).getCreatureStats (player);
         MWMechanics::NpcStats& pcStats = MWWorld::Class::get(player).getNpcStats (player);
 
@@ -82,11 +82,13 @@ namespace MWGui
 
     void LevelupDialog::resetCoins ()
     {
-        int curX = mMainWidget->getWidth()/2 - (16 + 2) * 1.5;
+        int curX = 0;
         for (int i=0; i<3; ++i)
         {
             MyGUI::ImageBox* image = mCoins[i];
-            image->setCoord(MyGUI::IntCoord(curX,250,16,16));
+            image->detachFromWidget();
+            image->attachToWidget(mCoinBox);
+            image->setCoord(MyGUI::IntCoord(curX,0,16,16));
             curX += 24+2;
         }
     }
@@ -97,6 +99,9 @@ namespace MWGui
         for (unsigned int i=0; i<mSpentAttributes.size(); ++i)
         {
             MyGUI::ImageBox* image = mCoins[i];
+            image->detachFromWidget();
+            image->attachToWidget(mMainWidget);
+
             int attribute = mSpentAttributes[i];
 
             int xdiff = mAttributeMultipliers[attribute]->getCaption() == "" ? 0 : 30;
@@ -110,32 +115,34 @@ namespace MWGui
 
     void LevelupDialog::open()
     {
-        MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayer().getPlayer();
+        MWBase::World *world = MWBase::Environment::get().getWorld();
+        MWWorld::Ptr player = world->getPlayerPtr();
         MWMechanics::CreatureStats& creatureStats = MWWorld::Class::get(player).getCreatureStats (player);
         MWMechanics::NpcStats& pcStats = MWWorld::Class::get(player).getNpcStats (player);
-
-        center();
 
         mSpentAttributes.clear();
         resetCoins();
 
         setAttributeValues();
 
-        // set class image
-        const ESM::Class& playerClass = MWBase::Environment::get().getWorld ()->getPlayer ().getClass ();
-        // retrieve the ID to this class
-        std::string classId;
-        std::map<std::string, ESM::Class> list = MWBase::Environment::get().getWorld()->getStore ().classes.list;
-        for (std::map<std::string, ESM::Class>::iterator it = list.begin(); it != list.end(); ++it)
-        {
-            if (playerClass.name == it->second.name)
-                classId = it->first;
-        }
-        mClassImage->setImageTexture ("textures\\levelup\\" + classId + ".dds");
+        const ESM::NPC *playerData = player.get<ESM::NPC>()->mBase;
 
-        /// \todo replace this with INI-imported texts
+        // set class image
+        const ESM::Class *cls =
+            world->getStore().get<ESM::Class>().find(playerData->mClass);
+
+        mClassImage->setImageTexture ("textures\\levelup\\" + cls->mId + ".dds");
+
         int level = creatureStats.getLevel ()+1;
         mLevelText->setCaptionWithReplacing("#{sLevelUpMenu1} " + boost::lexical_cast<std::string>(level));
+
+        std::string levelupdescription;
+        if(level>20)
+            levelupdescription=world->getFallback()->getFallbackString("Level_Up_Default");
+        else
+            levelupdescription=world->getFallback()->getFallbackString("Level_Up_Level"+boost::lexical_cast<std::string>(level));
+
+        mLevelDescription->setCaption (levelupdescription);
 
         for (int i=0; i<8; ++i)
         {
@@ -143,37 +150,33 @@ namespace MWGui
             int mult = pcStats.getLevelupAttributeMultiplier (i);
             text->setCaption(mult <= 1 ? "" : "x" + boost::lexical_cast<std::string>(mult));
         }
+
+        center();
     }
 
     void LevelupDialog::onOkButtonClicked (MyGUI::Widget* sender)
     {
-        MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayer().getPlayer();
-        MWMechanics::CreatureStats& creatureStats = MWWorld::Class::get(player).getCreatureStats (player);
+        MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayerPtr();
         MWMechanics::NpcStats& pcStats = MWWorld::Class::get(player).getNpcStats (player);
 
         if (mSpentAttributes.size() < 3)
-            MWBase::Environment::get().getWindowManager ()->messageBox("#{sNotifyMessage36}", std::vector<std::string>());
+            MWBase::Environment::get().getWindowManager ()->messageBox("#{sNotifyMessage36}");
         else
         {
             // increase attributes
             for (int i=0; i<3; ++i)
             {
-                MWMechanics::Stat<int>& attribute = creatureStats.getAttribute(mSpentAttributes[i]);
+                MWMechanics::AttributeValue attribute = pcStats.getAttribute(mSpentAttributes[i]);
                 attribute.setBase (attribute.getBase () + pcStats.getLevelupAttributeMultiplier (mSpentAttributes[i]));
 
                 if (attribute.getBase() >= 100)
                     attribute.setBase(100);
+                pcStats.setAttribute(mSpentAttributes[i], attribute);
             }
 
-            // "When you gain a level, in addition to increasing three primary attributes, your Health
-            // will automatically increase by 10% of your Endurance attribute. If you increased Endurance this level,
-            // the Health increase is calculated from the increased Endurance"
-            creatureStats.increaseLevelHealthBonus (creatureStats.getAttribute(ESM::Attribute::Endurance).getBase() * 0.1f);
-
-            creatureStats.setLevel (creatureStats.getLevel()+1);
             pcStats.levelUp ();
 
-            mWindowManager.removeGuiMode (GM_Rest);
+            MWBase::Environment::get().getWindowManager()->removeGuiMode (GM_Levelup);
         }
 
     }

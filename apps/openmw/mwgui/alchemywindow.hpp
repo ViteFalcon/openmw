@@ -1,51 +1,50 @@
 #ifndef MWGUI_ALCHEMY_H
 #define MWGUI_ALCHEMY_H
 
-#include "window_base.hpp"
-#include "container.hpp"
+#include <vector>
+
+#include "../mwmechanics/alchemy.hpp"
+
 #include "widgets.hpp"
+#include "windowbase.hpp"
 
 namespace MWGui
 {
-    class AlchemyWindow : public WindowBase, public ContainerBase
+    class ItemView;
+    class SortFilterItemModel;
+
+    class AlchemyWindow : public WindowBase
     {
     public:
-        AlchemyWindow(MWBase::WindowManager& parWindowManager);
+        AlchemyWindow();
 
         virtual void open();
 
-    protected:
+    private:
+        ItemView* mItemView;
+        SortFilterItemModel* mSortModel;
+
         MyGUI::Button* mCreateButton;
         MyGUI::Button* mCancelButton;
-
-        MyGUI::ImageBox* mIngredient1;
-        MyGUI::ImageBox* mIngredient2;
-        MyGUI::ImageBox* mIngredient3;
-        MyGUI::ImageBox* mIngredient4;
-
-        MyGUI::ImageBox* mApparatus1;
-        MyGUI::ImageBox* mApparatus2;
-        MyGUI::ImageBox* mApparatus3;
-        MyGUI::ImageBox* mApparatus4;
 
         MyGUI::Widget* mEffectsBox;
 
         MyGUI::EditBox* mNameEdit;
 
-        Widgets::SpellEffectList mEffects; // effects of created potion
-
         void onCancelButtonClicked(MyGUI::Widget* _sender);
         void onCreateButtonClicked(MyGUI::Widget* _sender);
         void onIngredientSelected(MyGUI::Widget* _sender);
 
-        virtual void onSelectedItemImpl(MWWorld::Ptr item);
-        virtual std::vector<MWWorld::Ptr> itemsToIgnore();
+        void onSelectedItem(int index);
 
         void removeIngredient(MyGUI::Widget* ingredient);
 
-        virtual void onReferenceUnavailable() { ; }
-
         void update();
+
+        MWMechanics::Alchemy mAlchemy;
+
+        std::vector<MyGUI::ImageBox *> mApparatus;
+        std::vector<MyGUI::ImageBox *> mIngredients;
     };
 }
 

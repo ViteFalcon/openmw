@@ -4,12 +4,13 @@
 #include <stdexcept>
 
 #include <components/compiler/extensions.hpp>
+#include <components/compiler/opcodes.hpp>
 
 #include <components/interpreter/interpreter.hpp>
 #include <components/interpreter/runtime.hpp>
 #include <components/interpreter/opcodes.hpp>
 
-#include "../mwbase/world.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
 
 #include "interpretercontext.hpp"
 #include "ref.hpp"
@@ -27,7 +28,7 @@ namespace MWScript
                 {
                     MWWorld::Ptr ptr = R()(runtime);
 
-                    MWBase::Environment::get().getWorld()->skipAnimation (ptr);
+                    MWBase::Environment::get().getMechanicsManager()->skipAnimation (ptr);
                }
         };
 
@@ -54,7 +55,7 @@ namespace MWScript
                             throw std::runtime_error ("animation mode out of range");
                     }
 
-                    MWBase::Environment::get().getWorld()->playAnimationGroup (ptr, group, mode, 1);
+                    MWBase::Environment::get().getMechanicsManager()->playAnimationGroup (ptr, group, mode, 1);
                }
         };
 
@@ -87,32 +88,19 @@ namespace MWScript
                             throw std::runtime_error ("animation mode out of range");
                     }
 
-                    MWBase::Environment::get().getWorld()->playAnimationGroup (ptr, group, mode, loops);
+                    MWBase::Environment::get().getMechanicsManager()->playAnimationGroup (ptr, group, mode, loops);
                }
         };
-
-        const int opcodeSkipAnim = 0x2000138;
-        const int opcodeSkipAnimExplicit = 0x2000139;
-        const int opcodePlayAnim = 0x20006;
-        const int opcodePlayAnimExplicit = 0x20007;
-        const int opcodeLoopAnim = 0x20008;
-        const int opcodeLoopAnimExplicit = 0x20009;
-
-        void registerExtensions (Compiler::Extensions& extensions)
-        {
-            extensions.registerInstruction ("skipanim", "", opcodeSkipAnim, opcodeSkipAnimExplicit);
-            extensions.registerInstruction ("playgroup", "c/l", opcodePlayAnim, opcodePlayAnimExplicit);
-            extensions.registerInstruction ("loopgroup", "cl/l", opcodeLoopAnim, opcodeLoopAnimExplicit);
-        }
+        
 
         void installOpcodes (Interpreter::Interpreter& interpreter)
         {
-            interpreter.installSegment5 (opcodeSkipAnim, new OpSkipAnim<ImplicitRef>);
-            interpreter.installSegment5 (opcodeSkipAnimExplicit, new OpSkipAnim<ExplicitRef>);
-            interpreter.installSegment3 (opcodePlayAnim, new OpPlayAnim<ImplicitRef>);
-            interpreter.installSegment3 (opcodePlayAnimExplicit, new OpPlayAnim<ExplicitRef>);
-            interpreter.installSegment3 (opcodeLoopAnim, new OpLoopAnim<ImplicitRef>);
-            interpreter.installSegment3 (opcodeLoopAnimExplicit, new OpLoopAnim<ExplicitRef>);
+            interpreter.installSegment5 (Compiler::Animation::opcodeSkipAnim, new OpSkipAnim<ImplicitRef>);
+            interpreter.installSegment5 (Compiler::Animation::opcodeSkipAnimExplicit, new OpSkipAnim<ExplicitRef>);
+            interpreter.installSegment3 (Compiler::Animation::opcodePlayAnim, new OpPlayAnim<ImplicitRef>);
+            interpreter.installSegment3 (Compiler::Animation::opcodePlayAnimExplicit, new OpPlayAnim<ExplicitRef>);
+            interpreter.installSegment3 (Compiler::Animation::opcodeLoopAnim, new OpLoopAnim<ImplicitRef>);
+            interpreter.installSegment3 (Compiler::Animation::opcodeLoopAnimExplicit, new OpLoopAnim<ExplicitRef>);
         }
     }
 }

@@ -5,6 +5,8 @@
 
 #include <components/compiler/extensions.hpp>
 #include <components/files/collections.hpp>
+#include <components/translation/translation.hpp>
+#include <components/settings/settings.hpp>
 
 #include "mwbase/environment.hpp"
 
@@ -59,29 +61,34 @@ namespace OMW
     class Engine : private Ogre::FrameListener
     {
             MWBase::Environment mEnvironment;
-            std::string mEncoding;
+            ToUTF8::FromType mEncoding;
+            ToUTF8::Utf8Encoder* mEncoder;
             Files::PathContainer mDataDirs;
+            std::vector<std::string> mArchives;
             boost::filesystem::path mResDir;
             OEngine::Render::OgreRenderer *mOgre;
             std::string mCellName;
-            std::string mMaster;
+            std::vector<std::string> mContentFiles;
             int mFpsLevel;
-            bool mDebug;
             bool mVerboseScripts;
-            bool mNewGame;
+            bool mSkipMenu;
             bool mUseSound;
             bool mCompileAll;
+            int mWarningsMode;
             std::string mFocusName;
             std::map<std::string,std::string> mFallbackMap;
             bool mScriptConsoleMode;
             std::string mStartupScript;
+            int mActivationDistanceOverride;
+            // Grab mouse?
+            bool mGrab;
 
             Compiler::Extensions mExtensions;
             Compiler::Context *mScriptContext;
 
-
             Files::Collections mFileCollections;
             bool mFSStrict;
+            Translation::Storage mTranslationDataStorage;
 
             // not implemented
             Engine (const Engine&);
@@ -94,12 +101,16 @@ namespace OMW
             /// add a .zip resource
             void addZipResource (const boost::filesystem::path& path);
 
-            /// Load all BSA files in data directory.
-            void loadBSA();
-
             void executeLocalScripts();
 
             virtual bool frameRenderingQueued (const Ogre::FrameEvent& evt);
+            virtual bool frameStarted (const Ogre::FrameEvent& evt);
+
+            /// Load settings from various files, returns the path to the user settings file
+            std::string loadSettings (Settings::Manager & settings);
+
+            /// Prepare engine for game play
+            void prepareEngine (Settings::Manager & settings);
 
         public:
             Engine(Files::ConfigurationManager& configurationManager);
@@ -114,23 +125,23 @@ namespace OMW
             /// Set data dirs
             void setDataDirs(const Files::PathContainer& dataDirs);
 
+            /// Add BSA archive
+            void addArchive(const std::string& archive);
+
             /// Set resource dir
             void setResourceDir(const boost::filesystem::path& parResDir);
 
             /// Set start cell name (only interiors for now)
             void setCell(const std::string& cellName);
 
-            /// Set master file (esm)
-            /// - If the given name does not have an extension, ".esm" is added automatically
-            /// - Currently OpenMW only supports one master at the same time.
-            void addMaster(const std::string& master);
+            /**
+             * @brief addContentFile - Adds content file (ie. esm/esp, or omwgame/omwaddon) to the content files container.
+             * @param file - filename (extension is required)
+             */
+            void addContentFile(const std::string& file);
 
             /// Enable fps counter
             void showFPS(int level);
-
-            /// Enable debug mode:
-            /// - non-exclusive input
-            void setDebugMode(bool debugMode);
 
             /// Enable or disable verbose script output
             void setScriptsVerbosity(bool scriptsVerbosity);
@@ -138,8 +149,9 @@ namespace OMW
             /// Disable or enable all sounds
             void setSoundUsage(bool soundUsage);
 
-            /// Start as a new game.
-            void setNewGame(bool newGame);
+            void setSkipMenu (bool skipMenu);
+
+            void setGrabMouse(bool grab) { mGrab = grab; }
 
             /// Initialise and enter main loop.
             void go();
@@ -154,9 +166,7 @@ namespace OMW
             void setCompileAll (bool all);
 
             /// Font encoding
-            void setEncoding(const std::string& encoding);
-
-            void setAnimationVerbose(bool animverbose);
+            void setEncoding(const ToUTF8::FromType& encoding);
 
             void setFallbackValues(std::map<std::string,std::string> map);
 
@@ -165,6 +175,11 @@ namespace OMW
 
             /// Set path for a script that is run on startup in the console.
             void setStartupScript (const std::string& path);
+
+            /// Override the game setting specified activation distance.
+            void setActivationDistanceOverride (int distance);
+
+            void setWarningsMode (int mode);
 
         private:
             Files::ConfigurationManager& mCfgMgr;

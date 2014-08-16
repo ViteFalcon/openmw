@@ -5,9 +5,17 @@
 #include <deque>
 #include <map>
 
+#include <stdint.h>
+
 #include "../mwdialogue/journalentry.hpp"
 #include "../mwdialogue/topic.hpp"
 #include "../mwdialogue/quest.hpp"
+
+namespace ESM
+{
+    class ESMReader;
+    class ESMWriter;
+}
 
 namespace MWBase
 {
@@ -33,6 +41,8 @@ namespace MWBase
 
             Journal() {}
 
+            virtual void clear() = 0;
+
             virtual ~Journal() {}
 
             virtual void addEntry (const std::string& id, int index) = 0;
@@ -44,7 +54,7 @@ namespace MWBase
             virtual int getJournalIndex (const std::string& id) const = 0;
             ///< Get the journal index.
 
-            virtual void addTopic (const std::string& topicId, const std::string& infoId) = 0;
+            virtual void addTopic (const std::string& topicId, const std::string& infoId, const std::string& actorName) = 0;
 
             virtual TEntryIter begin() const = 0;
             ///< Iterator pointing to the begin of the main journal.
@@ -67,6 +77,12 @@ namespace MWBase
 
             virtual TTopicIter topicEnd() const = 0;
             ///< Iterator pointing past the last topic.
+
+            virtual int countSavedGameRecords() const = 0;
+
+            virtual void write (ESM::ESMWriter& writer) const = 0;
+
+            virtual void readRecord (ESM::ESMReader& reader, int32_t type) = 0;
     };
 }
 

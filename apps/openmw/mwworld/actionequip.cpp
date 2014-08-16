@@ -2,6 +2,9 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
+#include "../mwbase/windowmanager.hpp"
+
+#include <components/compiler/locals.hpp>
 
 #include "inventorystore.hpp"
 #include "player.hpp"
@@ -15,17 +18,35 @@ namespace MWWorld
 
     void ActionEquip::executeImp (const Ptr& actor)
     {
-        MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayer().getPlayer();
-        MWWorld::InventoryStore& invStore = MWWorld::Class::get(player).getInventoryStore(player);
+        MWWorld::Ptr object = getTarget();
+        MWWorld::InventoryStore& invStore = actor.getClass().getInventoryStore(actor);
+
+        std::pair <int, std::string> result = object.getClass().canBeEquipped (object, actor);
+
+        // display error message if the player tried to equip something
+        if (!result.second.empty() && actor == MWBase::Environment::get().getWorld()->getPlayerPtr())
+            MWBase::Environment::get().getWindowManager()->messageBox(result.second);
+
+        switch(result.first)
+        {
+            case 0:
+                return;
+            case 2:
+                invStore.unequipSlot(MWWorld::InventoryStore::Slot_CarriedLeft, actor);
+                break;
+            case 3:
+                invStore.unequipSlot(MWWorld::InventoryStore::Slot_CarriedRight, actor);
+                break;
+        }
 
         // slots that this item can be equipped in
-        std::pair<std::vector<int>, bool> slots = MWWorld::Class::get(getTarget()).getEquipmentSlots(getTarget());
+        std::pair<std::vector<int>, bool> slots_ = MWWorld::Class::get(getTarget()).getEquipmentSlots(getTarget());
 
         // retrieve ContainerStoreIterator to the item
         MWWorld::ContainerStoreIterator it = invStore.begin();
         for (; it != invStore.end(); ++it)
         {
-            if (*it == getTarget())
+            if (*it == object)
             {
                 break;
             }
@@ -34,20 +55,24 @@ namespace MWWorld
         assert(it != invStore.end());
 
         // equip the item in the first free slot
-        for (std::vector<int>::const_iterator slot=slots.first.begin();
-            slot!=slots.first.end(); ++slot)
+        for (std::vector<int>::const_iterator slot=slots_.first.begin();
+            slot!=slots_.first.end(); ++slot)
         {
+            // if the item is equipped already, nothing to do
+            if (invStore.getSlot(*slot) == it)
+                return;
+
             // if all slots are occupied, replace the last slot
-            if (slot == --slots.first.end())
+            if (slot == --slots_.first.end())
             {
-                invStore.equip(*slot, it);
+                invStore.equip(*slot, it, actor);
                 break;
             }
 
             if (invStore.getSlot(*slot) == invStore.end())
             {
                 // slot is not occupied
-                invStore.equip(*slot, it);
+                invStore.equip(*slot, it, actor);
                 break;
             }
         }

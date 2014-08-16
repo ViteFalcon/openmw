@@ -15,30 +15,33 @@ namespace MWGui
     public:
         ToolTipInfo()
             : isPotion(false)
+            , imageSize(32)
+            , wordWrap(true)
+            , remainingEnchantCharge(-1)
         {}
 
         std::string caption;
         std::string text;
         std::string icon;
+        int imageSize;
 
         // enchantment (for cloth, armor, weapons)
         std::string enchant;
+        int remainingEnchantCharge;
 
         // effects (for potions, ingredients)
         Widgets::SpellEffectList effects;
 
         bool isPotion; // potions do not show target in the tooltip
+        bool wordWrap;
     };
 
     class ToolTips : public OEngine::GUI::Layout
     {
     public:
-        ToolTips(MWBase::WindowManager* windowManager);
+        ToolTips();
 
         void onFrame(float frameDuration);
-
-        void enterGameMode();
-        void enterGuiMode();
 
         void setEnabled(bool enabled);
 
@@ -71,11 +74,10 @@ namespace MWGui
         static void createBirthsignToolTip(MyGUI::Widget* widget, const std::string& birthsignId);
         static void createRaceToolTip(MyGUI::Widget* widget, const ESM::Race* playerRace);
         static void createClassToolTip(MyGUI::Widget* widget, const ESM::Class& playerClass);
+        static void createMagicEffectToolTip(MyGUI::Widget* widget, short id);
 
     private:
         MyGUI::Widget* mDynamicToolTipBox;
-
-        MWBase::WindowManager* mWindowManager;
 
         MWWorld::Ptr mFocusObject;
 
@@ -90,13 +92,17 @@ namespace MWGui
         float mFocusToolTipX;
         float mFocusToolTipY;
 
+        /// Adjust position for a tooltip so that it doesn't leave the screen and does not obscure the mouse cursor
+        void position(MyGUI::IntPoint& position, MyGUI::IntSize size, MyGUI::IntSize viewportSize);
+
+	int mHorizontalScrollIndex;
+
+
         float mDelay;
         float mRemainingDelay; // remaining time until tooltip will show
 
         int mLastMouseX;
         int mLastMouseY;
-
-        bool mGameMode;
 
         bool mEnabled;
 

@@ -1,12 +1,14 @@
-#ifndef _BULLET_SHAPE_LOADER_H_
-#define _BULLET_SHAPE_LOADER_H_
+#ifndef OPENMW_BULLET_SHAPE_LOADER_H_
+#define OPENMW_BULLET_SHAPE_LOADER_H_
 
 #include <OgreResource.h>
 #include <OgreResourceManager.h>
 #include <btBulletCollisionCommon.h>
+#include <OgreVector3.h>
 
-//For some reason, Ogre Singleton  cannot be used in another namespace, that's why there is no namespace here.
-//But the risk of name collision seems pretty low here.
+namespace OEngine {
+namespace Physic
+{
 
 /**
 *Define a new resource which describe a Shape usable by bullet.See BulletShapeManager for how to get/use them.
@@ -20,7 +22,7 @@ protected:
     void unloadImpl();
     size_t calculateSize() const;
 
-    void deleteShape(btCollisionShape* mShape);
+    void deleteShape(btCollisionShape* shape);
 
 public:
 
@@ -30,14 +32,24 @@ public:
 
     virtual ~BulletShape();
 
-    btCollisionShape* Shape;
+    btCollisionShape* mCollisionShape;
+    btCollisionShape* mRaycastingShape;
+
+    // Whether or not a NiRootCollisionNode was present in the .nif. If there is none, the collision behaviour
+    // depends on object type, so we need to expose this variable.
+    bool mHasCollisionNode;
+
+    Ogre::Vector3 mBoxTranslation;
+    Ogre::Quaternion mBoxRotation;
     //this flag indicate if the shape is used for collision or if it's for raycasting only.
-    bool collide;
+    bool mCollide;
 };
 
 /**
 *
 */
+
+#if (OGRE_VERSION < ((1 << 16) | (9 << 8) | 0))
 class BulletShapePtr : public Ogre::SharedPtr<BulletShape>
 {
 public:
@@ -81,9 +93,9 @@ public:
         return *this;
     }
 };
-
-
-
+#else
+typedef Ogre::SharedPtr<BulletShape> BulletShapePtr;
+#endif
 
 /**
 *Hold any BulletShape that was created by the ManualBulletShapeLoader.
@@ -103,7 +115,7 @@ public:
 *Important Note: i have no idea of what happen if you try to load two time the same resource without unloading.
 *It won't crash, but it might lead to memory leaks(I don't know how Ogre handle this). So don't do it!
 */
-class BulletShapeManager : public Ogre::ResourceManager, public Ogre::Singleton<BulletShapeManager>
+class BulletShapeManager : public Ogre::ResourceManager
 {
 protected:
 
@@ -112,10 +124,33 @@ protected:
         const Ogre::String &group, bool isManual, Ogre::ManualResourceLoader *loader,
         const Ogre::NameValuePairList *createParams);
 
+    static BulletShapeManager *sThis;
+
+private:
+    /** \brief Explicit private copy constructor. This is a forbidden operation.*/
+    BulletShapeManager(const BulletShapeManager &);
+
+    /** \brief Private operator= . This is a forbidden operation. */
+    BulletShapeManager& operator=(const BulletShapeManager &);
+
+
 public:
 
     BulletShapeManager();
     virtual ~BulletShapeManager();
+
+
+#if (OGRE_VERSION >= ((1 << 16) | (9 << 8) | 0))
+    /// Get a resource by name
+    /// @see ResourceManager::getByName
+    BulletShapePtr getByName(const Ogre::String& name, const Ogre::String& groupName = Ogre::ResourceGroupManager::AUTODETECT_RESOURCE_GROUP_NAME);
+
+    /// Create a new shape
+    /// @see ResourceManager::createResource
+    BulletShapePtr create (const Ogre::String& name, const Ogre::String& group,
+                        bool isManual = false, Ogre::ManualResourceLoader* loader = 0,
+                        const Ogre::NameValuePairList* createParams = 0);
+#endif
 
     virtual BulletShapePtr load(const Ogre::String &name, const Ogre::String &group);
 
@@ -134,5 +169,8 @@ public:
 
     virtual void load(const std::string &name,const std::string &group);
 };
+
+}
+}
 
 #endif

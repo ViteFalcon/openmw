@@ -4,6 +4,10 @@
 #include <OgreRenderTexture.h>
 #include <OgreSubEntity.h>
 #include <OgreEntity.h>
+#include <OgreTechnique.h>
+#include <OgreTextureManager.h>
+#include <OgreViewport.h>
+
 #include <stdexcept>
 
 #include <extern/shiny/Main/Factory.hpp>
@@ -24,7 +28,8 @@ namespace Render
         vp->setBackgroundColour(Ogre::ColourValue(0, 0, 0, 0));
         vp->setShadowsEnabled(false);
         vp->setMaterialScheme("selectionbuffer");
-        vp->setVisibilityMask (visibilityFlags);
+        if (visibilityFlags != 0)
+            vp->setVisibilityMask (visibilityFlags);
         mRenderTarget->setActive(true);
         mRenderTarget->setAutoUpdated (false);
 
@@ -99,7 +104,16 @@ namespace Render
                 return m->getTechnique(1);
             }
             else
-                throw std::runtime_error("selectionbuffer only works with entities");
+            {
+                m = Ogre::MaterialManager::getSingleton().getByName("NullMaterial");
+                if(m.isNull())
+                {
+                    m = Ogre::MaterialManager::getSingleton().create("NullMaterial", Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
+                    m->getTechnique(0)->getPass(0)->setDepthCheckEnabled(true);
+                    m->getTechnique(0)->getPass(0)->setDepthFunction(Ogre::CMPF_ALWAYS_FAIL);
+                }
+                return m->getTechnique(0);
+            }
         }
         return NULL;
     }

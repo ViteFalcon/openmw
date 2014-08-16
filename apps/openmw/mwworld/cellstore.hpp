@@ -1,192 +1,315 @@
 #ifndef GAME_MWWORLD_CELLSTORE_H
 #define GAME_MWWORLD_CELLSTORE_H
 
-#include <components/esm/records.hpp>
-
-#include <list>
 #include <algorithm>
+#include <stdexcept>
 
-#include "refdata.hpp"
+#include "livecellref.hpp"
+#include "esmstore.hpp"
+#include "cellreflist.hpp"
 
-namespace ESMS
+namespace ESM
 {
-    struct ESMStore;
+    struct CellState;
 }
 
 namespace MWWorld
 {
     class Ptr;
 
-  /// A reference to one object (of any type) in a cell.
-  ///
-  /// Constructing this with a CellRef instance in the constructor means that
-  /// in practice (where D is RefData) the possibly mutable data is copied
-  /// across to mData. If later adding data (such as position) to CellRef
-  /// this would have to be manually copied across.
-  template <typename X>
-  struct LiveCellRef
-  {
-    LiveCellRef(const ESM::CellRef& cref, const X* b = NULL) : base(b), ref(cref),
-                                                          mData(ref) {}
-
-
-    LiveCellRef(const X* b = NULL) : base(b), mData(ref) {}
-
-    // The object that this instance is based on.
-    const X* base;
-
-    /* Information about this instance, such as 3D location and
-       rotation and individual type-dependent data.
-    */
-    ESM::CellRef ref;
-
-    /// runtime-data
-    RefData mData;
-  };
-
-  /// A list of cell references
-  template <typename X>
-  struct CellRefList
-  {
-    typedef LiveCellRef<X> LiveRef;
-    typedef std::list<LiveRef> List;
-    List list;
-
-    // Search for the given reference in the given reclist from
-    // ESMStore. Insert the reference into the list if a match is
-    // found. If not, throw an exception.
-    template <typename Y>
-    void find(ESM::CellRef &ref, const Y& recList)
+    /// \brief Mutable state of a cell
+    class CellStore
     {
-      const X* obj = recList.find(ref.refID);
-      if(obj == NULL)
-        throw std::runtime_error("Error resolving cell reference " + ref.refID);
+        public:
 
-      list.push_back(LiveRef(ref, obj));
-    }
+            enum State
+            {
+                State_Unloaded, State_Preloaded, State_Loaded
+            };
 
-    LiveRef *find (const std::string& name)
-    {
-        for (typename std::list<LiveRef>::iterator iter (list.begin()); iter!=list.end(); ++iter)
-        {
-            if (iter->mData.getCount() > 0 && iter->ref.refID == name)
-                return &*iter;
-        }
+        private:
 
-        return 0;
-    }
+            const ESM::Cell *mCell;
+            State mState;
+            bool mHasState;
+            std::vector<std::string> mIds;
+            float mWaterLevel;
 
-    LiveRef &insert(const LiveRef &item) {
-        list.push_back(item);
-        return list.back();
-    }
-  };
+            CellRefList<ESM::Activator>         mActivators;
+            CellRefList<ESM::Potion>            mPotions;
+            CellRefList<ESM::Apparatus>         mAppas;
+            CellRefList<ESM::Armor>             mArmors;
+            CellRefList<ESM::Book>              mBooks;
+            CellRefList<ESM::Clothing>          mClothes;
+            CellRefList<ESM::Container>         mContainers;
+            CellRefList<ESM::Creature>          mCreatures;
+            CellRefList<ESM::Door>              mDoors;
+            CellRefList<ESM::Ingredient>        mIngreds;
+            CellRefList<ESM::CreatureLevList>   mCreatureLists;
+            CellRefList<ESM::ItemLevList>       mItemLists;
+            CellRefList<ESM::Light>             mLights;
+            CellRefList<ESM::Lockpick>          mLockpicks;
+            CellRefList<ESM::Miscellaneous>     mMiscItems;
+            CellRefList<ESM::NPC>               mNpcs;
+            CellRefList<ESM::Probe>             mProbes;
+            CellRefList<ESM::Repair>            mRepairs;
+            CellRefList<ESM::Static>            mStatics;
+            CellRefList<ESM::Weapon>            mWeapons;
 
-  /// A storage struct for one single cell reference.
-  class CellStore
-  {
-  public:
+        public:
 
-    enum State
-    {
-        State_Unloaded, State_Preloaded, State_Loaded
+            CellStore (const ESM::Cell *cell_);
+
+            const ESM::Cell *getCell() const;
+
+            State getState() const;
+
+            bool hasState() const;
+            ///< Does this cell have state that needs to be stored in a saved game file?
+
+            bool hasId (const std::string& id) const;
+            ///< May return true for deleted IDs when in preload state. Will return false, if cell is
+            /// unloaded.
+
+            Ptr search (const std::string& id);
+            ///< Will return an empty Ptr if cell is not loaded. Does not check references in
+            /// containers.
+
+            Ptr searchViaHandle (const std::string& handle);
+            ///< Will return an empty Ptr if cell is not loaded.
+
+            float getWaterLevel() const;
+
+            void setWaterLevel (float level);
+
+            int count() const;
+            ///< Return total number of references, including deleted ones.
+
+            void load (const MWWorld::ESMStore &store, std::vector<ESM::ESMReader> &esm);
+            ///< Load references from content file.
+
+            void preload (const MWWorld::ESMStore &store, std::vector<ESM::ESMReader> &esm);
+            ///< Build ID list from content file.
+
+            /// Call functor (ref) for each reference. functor must return a bool. Returning
+            /// false will abort the iteration.
+            /// \return Iteration completed?
+            ///
+            /// \note Creatures and NPCs are handled last.
+            template<class Functor>
+            bool forEach (Functor& functor)
+            {
+                mHasState = true;
+
+                return
+                    forEachImp (functor, mActivators) &&
+                    forEachImp (functor, mPotions) &&
+                    forEachImp (functor, mAppas) &&
+                    forEachImp (functor, mArmors) &&
+                    forEachImp (functor, mBooks) &&
+                    forEachImp (functor, mClothes) &&
+                    forEachImp (functor, mContainers) &&
+                    forEachImp (functor, mDoors) &&
+                    forEachImp (functor, mIngreds) &&
+                    forEachImp (functor, mItemLists) &&
+                    forEachImp (functor, mLights) &&
+                    forEachImp (functor, mLockpicks) &&
+                    forEachImp (functor, mMiscItems) &&
+                    forEachImp (functor, mProbes) &&
+                    forEachImp (functor, mRepairs) &&
+                    forEachImp (functor, mStatics) &&
+                    forEachImp (functor, mWeapons) &&
+                    forEachImp (functor, mCreatures) &&
+                    forEachImp (functor, mNpcs) &&
+                    forEachImp (functor, mCreatureLists);
+            }
+
+            bool isExterior() const;
+
+            Ptr searchInContainer (const std::string& id);
+
+            void loadState (const ESM::CellState& state);
+
+            void saveState (ESM::CellState& state) const;
+
+            void writeReferences (ESM::ESMWriter& writer) const;
+
+            void readReferences (ESM::ESMReader& reader, const std::map<int, int>& contentFileMap);
+
+            template <class T>
+            CellRefList<T>& get() {
+                throw std::runtime_error ("Storage for this type not exist in cells");
+            }
+
+        private:
+
+            template<class Functor, class List>
+            bool forEachImp (Functor& functor, List& list)
+            {
+                for (typename List::List::iterator iter (list.mList.begin()); iter!=list.mList.end();
+                    ++iter)
+                {
+                    if (!iter->mData.getCount())
+                        continue;
+                    if (!functor (MWWorld::Ptr(&*iter, this)))
+                        return false;
+                }
+                return true;
+            }
+
+            /// Run through references and store IDs
+            void listRefs(const MWWorld::ESMStore &store, std::vector<ESM::ESMReader> &esm);
+
+            void loadRefs(const MWWorld::ESMStore &store, std::vector<ESM::ESMReader> &esm);
+
+            void loadRef (ESM::CellRef& ref, bool deleted, const ESMStore& store);
+            ///< Make case-adjustments to \a ref and insert it into the respective container.
+            ///
+            /// Invalid \a ref objects are silently dropped.
     };
 
-    CellStore (const ESM::Cell *cell_);
-
-    const ESM::Cell *cell;
-    State mState;
-    std::vector<std::string> mIds;
-
-    float mWaterLevel;
-
-    // Lists for each individual object type
-    CellRefList<ESM::Activator>         activators;
-    CellRefList<ESM::Potion>            potions;
-    CellRefList<ESM::Apparatus>         appas;
-    CellRefList<ESM::Armor>             armors;
-    CellRefList<ESM::Book>              books;
-    CellRefList<ESM::Clothing>          clothes;
-    CellRefList<ESM::Container>         containers;
-    CellRefList<ESM::Creature>          creatures;
-    CellRefList<ESM::Door>              doors;
-    CellRefList<ESM::Ingredient>        ingreds;
-    CellRefList<ESM::CreatureLevList>   creatureLists;
-    CellRefList<ESM::ItemLevList>       itemLists;
-    CellRefList<ESM::Light>             lights;
-    CellRefList<ESM::Tool>              lockpicks;
-    CellRefList<ESM::Miscellaneous>     miscItems;
-    CellRefList<ESM::NPC>               npcs;
-    CellRefList<ESM::Probe>             probes;
-    CellRefList<ESM::Repair>            repairs;
-    CellRefList<ESM::Static>            statics;
-    CellRefList<ESM::Weapon>            weapons;
-
-    void load (const ESMS::ESMStore &store, ESM::ESMReader &esm);
-
-    void preload (const ESMS::ESMStore &store, ESM::ESMReader &esm);
-
-    /// Call functor (ref) for each reference. functor must return a bool. Returning
-    /// false will abort the iteration.
-    /// \return Iteration completed?
-    template<class Functor>
-    bool forEach (Functor& functor)
+    template<>
+    inline CellRefList<ESM::Activator>& CellStore::get<ESM::Activator>()
     {
-        return
-            forEachImp (functor, activators) &&
-            forEachImp (functor, potions) &&
-            forEachImp (functor, appas) &&
-            forEachImp (functor, armors) &&
-            forEachImp (functor, books) &&
-            forEachImp (functor, clothes) &&
-            forEachImp (functor, containers) &&
-            forEachImp (functor, creatures) &&
-            forEachImp (functor, doors) &&
-            forEachImp (functor, ingreds) &&
-            forEachImp (functor, creatureLists) &&
-            forEachImp (functor, itemLists) &&
-            forEachImp (functor, lights) &&
-            forEachImp (functor, lockpicks) &&
-            forEachImp (functor, miscItems) &&
-            forEachImp (functor, npcs) &&
-            forEachImp (functor, probes) &&
-            forEachImp (functor, repairs) &&
-            forEachImp (functor, statics) &&
-            forEachImp (functor, weapons);
+        mHasState = true;
+        return mActivators;
     }
 
-    bool operator==(const CellStore &cell) {
-        return  this->cell->name == cell.cell->name &&
-                this->cell->data.gridX == cell.cell->data.gridX &&
-                this->cell->data.gridY == cell.cell->data.gridY;
-    }
-
-    bool operator!=(const CellStore &cell) {
-        return !(*this == cell);
-    }
-
-    bool isExterior() const {
-        return cell->isExterior();
-    }
-
-  private:
-
-    template<class Functor, class List>
-    bool forEachImp (Functor& functor, List& list)
+    template<>
+    inline CellRefList<ESM::Potion>& CellStore::get<ESM::Potion>()
     {
-        for (typename List::List::iterator iter (list.list.begin()); iter!=list.list.end();
-            ++iter)
-            if (!functor (iter->ref, iter->mData))
-                return false;
-
-        return true;
+        mHasState = true;
+        return mPotions;
     }
 
-    /// Run through references and store IDs
-    void listRefs(const ESMS::ESMStore &store, ESM::ESMReader &esm);
+    template<>
+    inline CellRefList<ESM::Apparatus>& CellStore::get<ESM::Apparatus>()
+    {
+        mHasState = true;
+        return mAppas;
+    }
 
-    void loadRefs(const ESMS::ESMStore &store, ESM::ESMReader &esm);
-  };
+    template<>
+    inline CellRefList<ESM::Armor>& CellStore::get<ESM::Armor>()
+    {
+        mHasState = true;
+        return mArmors;
+    }
+
+    template<>
+    inline CellRefList<ESM::Book>& CellStore::get<ESM::Book>()
+    {
+        mHasState = true;
+        return mBooks;
+    }
+
+    template<>
+    inline CellRefList<ESM::Clothing>& CellStore::get<ESM::Clothing>()
+    {
+        mHasState = true;
+        return mClothes;
+    }
+
+    template<>
+    inline CellRefList<ESM::Container>& CellStore::get<ESM::Container>()
+    {
+        mHasState = true;
+        return mContainers;
+    }
+
+    template<>
+    inline CellRefList<ESM::Creature>& CellStore::get<ESM::Creature>()
+    {
+        mHasState = true;
+        return mCreatures;
+    }
+
+    template<>
+    inline CellRefList<ESM::Door>& CellStore::get<ESM::Door>()
+    {
+        mHasState = true;
+        return mDoors;
+    }
+
+    template<>
+    inline CellRefList<ESM::Ingredient>& CellStore::get<ESM::Ingredient>()
+    {
+        mHasState = true;
+        return mIngreds;
+    }
+
+    template<>
+    inline CellRefList<ESM::CreatureLevList>& CellStore::get<ESM::CreatureLevList>()
+    {
+        mHasState = true;
+        return mCreatureLists;
+    }
+
+    template<>
+    inline CellRefList<ESM::ItemLevList>& CellStore::get<ESM::ItemLevList>()
+    {
+        mHasState = true;
+        return mItemLists;
+    }
+
+    template<>
+    inline CellRefList<ESM::Light>& CellStore::get<ESM::Light>()
+    {
+        mHasState = true;
+        return mLights;
+    }
+
+    template<>
+    inline CellRefList<ESM::Lockpick>& CellStore::get<ESM::Lockpick>()
+    {
+        mHasState = true;
+        return mLockpicks;
+    }
+
+    template<>
+    inline CellRefList<ESM::Miscellaneous>& CellStore::get<ESM::Miscellaneous>()
+    {
+        mHasState = true;
+        return mMiscItems;
+    }
+
+    template<>
+    inline CellRefList<ESM::NPC>& CellStore::get<ESM::NPC>()
+    {
+        mHasState = true;
+        return mNpcs;
+    }
+
+    template<>
+    inline CellRefList<ESM::Probe>& CellStore::get<ESM::Probe>()
+    {
+        mHasState = true;
+        return mProbes;
+    }
+
+    template<>
+    inline CellRefList<ESM::Repair>& CellStore::get<ESM::Repair>()
+    {
+        mHasState = true;
+        return mRepairs;
+    }
+
+    template<>
+    inline CellRefList<ESM::Static>& CellStore::get<ESM::Static>()
+    {
+        mHasState = true;
+        return mStatics;
+    }
+
+    template<>
+    inline CellRefList<ESM::Weapon>& CellStore::get<ESM::Weapon>()
+    {
+        mHasState = true;
+        return mWeapons;
+    }
+
+    bool operator== (const CellStore& left, const CellStore& right);
+    bool operator!= (const CellStore& left, const CellStore& right);
 }
 
 #endif

@@ -13,8 +13,8 @@
  * =====================================================================================
  */
 
-#ifndef _BtOgreShapes_H_
-#define _BtOgreShapes_H_
+#ifndef BtOgreShapes_H_
+#define BtOgreShapes_H_
 
 #include "btBulletDynamicsCommon.h"
 #include "OgreSimpleRenderable.h"
@@ -206,6 +206,8 @@ public:
                 }
 
         mLineDrawer->setMaterial("BtOgre/DebugLines");
+
+        //mLineDrawer->setVisibilityFlags (1024);
     }
 
     ~DebugDrawer()

@@ -7,22 +7,28 @@
 #include <exception>
 
 #include <components/esm/loadscpt.hpp>
-#include <components/esm_store/store.hpp>
+
+#include <components/misc/stringops.hpp>
 
 #include <components/compiler/scanner.hpp>
 #include <components/compiler/context.hpp>
 #include <components/compiler/exception.hpp>
+#include <components/compiler/quickfileparser.hpp>
+
+#include "../mwworld/esmstore.hpp"
 
 #include "extensions.hpp"
 
 namespace MWScript
 {
-    ScriptManager::ScriptManager (const ESMS::ESMStore& store, bool verbose,
-        Compiler::Context& compilerContext)
+    ScriptManager::ScriptManager (const MWWorld::ESMStore& store, bool verbose,
+        Compiler::Context& compilerContext, int warningsMode)
     : mErrorHandler (std::cerr), mStore (store), mVerbose (verbose),
       mCompilerContext (compilerContext), mParser (mErrorHandler, mCompilerContext),
       mOpcodesInstalled (false), mGlobalScripts (store)
-    {}
+    {
+        mErrorHandler.setWarningsMode (warningsMode);
+    }
 
     bool ScriptManager::compile (const std::string& name)
     {
@@ -31,14 +37,14 @@ namespace MWScript
 
         bool Success = true;
 
-        if (const ESM::Script *script = mStore.scripts.find (name))
+        if (const ESM::Script *script = mStore.get<ESM::Script>().find (name))
         {
             if (mVerbose)
                 std::cout << "compiling script: " << name << std::endl;
 
             try
             {
-                std::istringstream input (script->scriptText);
+                std::istringstream input (script->mScriptText);
 
                 Compiler::Scanner scanner (mErrorHandler, input, mCompilerContext.getExtensions());
 
@@ -62,7 +68,7 @@ namespace MWScript
             {
                 std::cerr
                     << "compiling failed: " << name << std::endl
-                    << script->scriptText
+                    << script->mScriptText
                     << std::endl << std::endl;
             }
 
@@ -114,10 +120,8 @@ namespace MWScript
             }
             catch (const std::exception& e)
             {
-                std::cerr << "exeution of script " << name << " failed." << std::endl;
-
-                if (mVerbose)
-                    std::cerr << "(" << e.what() << ")" << std::endl;
+                std::cerr << "Execution of script " << name << " failed:" << std::endl;
+                std::cerr << e.what() << std::endl;
 
                 iter->second.first.clear(); // don't execute again.
             }
@@ -125,15 +129,14 @@ namespace MWScript
 
     std::pair<int, int> ScriptManager::compileAll()
     {
-        typedef ESMS::ScriptListT<ESM::Script>::MapType Container;
-
-        const Container& scripts = mStore.scripts.list;
-
         int count = 0;
         int success = 0;
 
-        for (Container::const_iterator iter (scripts.begin()); iter!=scripts.end(); ++iter, ++count)
-            if (compile (iter->first))
+        const MWWorld::Store<ESM::Script>& scripts = mStore.get<ESM::Script>();
+        MWWorld::Store<ESM::Script>::iterator it = scripts.begin();
+
+        for (; it != scripts.end(); ++it, ++count)
+            if (compile (it->mId))
                 ++success;
 
         return std::make_pair (count, success);
@@ -141,25 +144,38 @@ namespace MWScript
 
     Compiler::Locals& ScriptManager::getLocals (const std::string& name)
     {
-        ScriptCollection::iterator iter = mScripts.find (name);
+        std::string name2 = Misc::StringUtils::lowerCase (name);
 
-        if (iter==mScripts.end())
         {
-            if (!compile (name))
-            {
-                /// \todo Handle case of cyclic member variable access. Currently this could look up
-                /// the whole application in an endless recursion.
+            ScriptCollection::iterator iter = mScripts.find (name2);
 
-                // failed -> ignore script from now on.
-                std::vector<Interpreter::Type_Code> empty;
-                mScripts.insert (std::make_pair (name, std::make_pair (empty, Compiler::Locals())));
-                throw std::runtime_error ("failed to compile script " + name);
-            }
-
-            iter = mScripts.find (name);
+            if (iter!=mScripts.end())
+                return iter->second.second;
         }
 
-        return iter->second.second;
+        {
+            std::map<std::string, Compiler::Locals>::iterator iter = mOtherLocals.find (name2);
+
+            if (iter!=mOtherLocals.end())
+                return iter->second;
+        }
+
+        if (const ESM::Script *script = mStore.get<ESM::Script>().find (name2))
+        {
+            Compiler::Locals locals;
+
+            std::istringstream stream (script->mScriptText);
+            Compiler::QuickFileParser parser (mErrorHandler, mCompilerContext, locals);
+            Compiler::Scanner scanner (mErrorHandler, stream, mCompilerContext.getExtensions());
+            scanner.scan (parser);
+
+            std::map<std::string, Compiler::Locals>::iterator iter =
+                mOtherLocals.insert (std::make_pair (name2, locals)).first;
+
+            return iter->second;
+        }
+
+        throw std::logic_error ("script " + name + " does not exist");
     }
 
     GlobalScripts& ScriptManager::getGlobalScripts()
@@ -170,7 +186,7 @@ namespace MWScript
     int ScriptManager::getLocalIndex (const std::string& scriptId, const std::string& variable,
         char type)
     {
-        const ESM::Script *script = mStore.scripts.find (scriptId);
+        const ESM::Script *script = mStore.get<ESM::Script>().find (scriptId);
 
         int offset = 0;
         int size = 0;
@@ -180,27 +196,30 @@ namespace MWScript
             case 's':
 
                 offset = 0;
-                size = script->data.numShorts;
+                size = script->mData.mNumShorts;
                 break;
 
             case 'l':
 
-                offset = script->data.numShorts;
-                size = script->data.numLongs;
+                offset = script->mData.mNumShorts;
+                size = script->mData.mNumLongs;
                 break;
 
             case 'f':
 
-                offset = script->data.numShorts+script->data.numLongs;
-                size = script->data.numFloats;
+                offset = script->mData.mNumShorts+script->mData.mNumLongs;
+                size = script->mData.mNumFloats;
+                break;
 
             default:
 
                 throw std::runtime_error ("invalid variable type");
         }
 
+        std::string variable2 = Misc::StringUtils::lowerCase (variable);
+
         for (int i=0; i<size; ++i)
-            if (script->varNames.at (i+offset)==variable)
+            if (Misc::StringUtils::lowerCase (script->mVarNames.at (i+offset))==variable2)
                 return i;
 
         throw std::runtime_error ("unable to access local variable " + variable + " of " + scriptId);

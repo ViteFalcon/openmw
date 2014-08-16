@@ -1,7 +1,16 @@
 #include "aipackage.hpp"
 
+#include "esmreader.hpp"
+#include "esmwriter.hpp"
+
 namespace ESM
 {
+    void AIData::blank()
+    {
+        mHello = mU1 = mFight = mFlee = mAlarm = mU2 = mU3 = mU4 = 0;
+        mServices = 0;
+    }
+
     void AIPackageList::load(ESMReader &esm)
     {
         while (esm.hasMoreSubs()) {
@@ -31,6 +40,37 @@ namespace ESM
                 mList.push_back(pack);
             } else { // not AI package related data, so leave
                  return;
+            }
+        }
+    }
+
+    void AIPackageList::save(ESMWriter &esm) const
+    {
+        typedef std::vector<AIPackage>::const_iterator PackageIter;
+        for (PackageIter it = mList.begin(); it != mList.end(); ++it) {
+            switch (it->mType) {
+            case AI_Wander:
+                esm.writeHNT("AI_W", it->mWander, sizeof(it->mWander));
+                break;
+
+            case AI_Travel:
+                esm.writeHNT("AI_T", it->mTravel, sizeof(it->mTravel));
+                break;
+
+            case AI_Activate:
+                esm.writeHNT("AI_A", it->mActivate, sizeof(it->mActivate));
+                break;
+
+            case AI_Escort:
+            case AI_Follow: {
+                const char *name = (it->mType == AI_Escort) ? "AI_E" : "AI_F";
+                esm.writeHNT(name, it->mTarget, sizeof(it->mTarget));
+                esm.writeHNOCString("CNDT", it->mCellName);
+                break;
+            }
+
+            default:
+                break;
             }
         }
     }

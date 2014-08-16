@@ -1,16 +1,25 @@
-#ifndef _ESM_DOOR_H
-#define _ESM_DOOR_H
+#ifndef OPENMW_ESM_DOOR_H
+#define OPENMW_ESM_DOOR_H
 
-#include "esm_reader.hpp"
+#include <string>
 
 namespace ESM
 {
 
+class ESMReader;
+class ESMWriter;
+
 struct Door
 {
-    std::string name, model, script, openSound, closeSound;
+    static unsigned int sRecordId;
+
+    std::string mId, mName, mModel, mScript, mOpenSound, mCloseSound;
 
     void load(ESMReader &esm);
+    void save(ESMWriter &esm) const;
+
+    void blank();
+    ///< Set record to default state (does not touch the ID).
 };
 }
 #endif

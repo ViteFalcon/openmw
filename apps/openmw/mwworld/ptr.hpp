@@ -1,13 +1,18 @@
 #ifndef GAME_MWWORLD_PTR_H
 #define GAME_MWWORLD_PTR_H
 
-#include <boost/any.hpp>
+#include <cassert>
 
-#include "cellstore.hpp"
+#include <string>
+#include <sstream>
+
+#include "cellreflist.hpp"
+#include "livecellref.hpp"
 
 namespace MWWorld
 {
     class ContainerStore;
+    class CellStore;
 
     /// \brief Pointer to a LiveCellRef
 
@@ -15,66 +20,59 @@ namespace MWWorld
     {
         public:
 
-            typedef MWWorld::CellStore CellStore;
-            ///< \deprecated
-
-            boost::any mPtr;
-            ESM::CellRef *mCellRef;
-            RefData *mRefData;
+            MWWorld::LiveCellRefBase *mRef;
             CellStore *mCell;
-            std::string mTypeName;
             ContainerStore *mContainerStore;
 
         public:
-
-            Ptr() : mCellRef (0), mRefData (0), mCell (0), mContainerStore (0) {}
+            Ptr(MWWorld::LiveCellRefBase *liveCellRef=0, CellStore *cell=0)
+              : mRef(liveCellRef), mCell(cell), mContainerStore(0)
+            {
+            }
 
             bool isEmpty() const
             {
-                return mPtr.empty();
+                return mRef == 0;
             }
 
-            const std::type_info& getType() const
-            {
-                assert (!mPtr.empty());
-                return mPtr.type();
-            }
+            const std::string& getTypeName() const;
 
-            const std::string& getTypeName() const
+            const Class& getClass() const
             {
-                return mTypeName;
-            }
-
-            template<typename T>
-            Ptr (MWWorld::LiveCellRef<T> *liveCellRef, CellStore *cell)
-            : mContainerStore (0)
-            {
-                mPtr = liveCellRef;
-                mCellRef = &liveCellRef->ref;
-                mRefData = &liveCellRef->mData;
-                mCell = cell;
-                mTypeName = typeid (T).name();
+                if(mRef != 0)
+                    return *(mRef->mClass);
+                throw std::runtime_error("Cannot get class of an empty object");
             }
 
             template<typename T>
             MWWorld::LiveCellRef<T> *get() const
             {
-                return boost::any_cast<MWWorld::LiveCellRef<T>*> (mPtr);
+                MWWorld::LiveCellRef<T> *ref = dynamic_cast<MWWorld::LiveCellRef<T>*>(mRef);
+                if(ref) return ref;
+
+                std::stringstream str;
+                str<< "Bad LiveCellRef cast to "<<typeid(T).name()<<" from ";
+                if(mRef != 0) str<< getTypeName();
+                else str<< "an empty object";
+
+                throw std::runtime_error(str.str());
             }
+
+            MWWorld::LiveCellRefBase *getBase() const;
 
             ESM::CellRef& getCellRef() const;
 
             RefData& getRefData() const;
 
-            Ptr::CellStore *getCell() const
+            CellStore *getCell() const
             {
-                assert (mCell);
+                assert(mCell);
                 return mCell;
             }
 
             bool isInCell() const
             {
-                return (mCell != 0);
+                return (mContainerStore == 0) && (mCell != 0);
             }
 
             void setContainerStore (ContainerStore *store);
@@ -82,11 +80,14 @@ namespace MWWorld
 
             ContainerStore *getContainerStore() const;
             ///< May return a 0-pointer, if reference is not in a container.
+
+            operator const void *();
+            ///< Return a 0-pointer, if Ptr is empty; return a non-0-pointer, if Ptr is not empty
     };
 
     inline bool operator== (const Ptr& left, const Ptr& right)
     {
-        return left.mRefData==right.mRefData;
+        return left.mRef==right.mRef;
     }
 
     inline bool operator!= (const Ptr& left, const Ptr& right)
@@ -96,7 +97,7 @@ namespace MWWorld
 
     inline bool operator< (const Ptr& left, const Ptr& right)
     {
-        return left.mRefData<right.mRefData;
+        return left.mRef<right.mRef;
     }
 
     inline bool operator>= (const Ptr& left, const Ptr& right)

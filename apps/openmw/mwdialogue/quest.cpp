@@ -1,7 +1,9 @@
 
 #include "quest.hpp"
 
-#include <components/esm_store/store.hpp>
+#include <components/esm/queststate.hpp>
+
+#include "../mwworld/esmstore.hpp"
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
@@ -16,14 +18,19 @@ namespace MWDialogue
     : Topic (topic), mIndex (0), mFinished (false)
     {}
 
-    const std::string Quest::getName() const
+    Quest::Quest (const ESM::QuestState& state)
+    : Topic (state.mTopic), mIndex (state.mState), mFinished (state.mFinished!=0)
+    {}
+
+    std::string Quest::getName() const
     {
-        const ESM::Dialogue *dialogue = MWBase::Environment::get().getWorld()->getStore().dialogs.find (mTopic);
+        const ESM::Dialogue *dialogue =
+            MWBase::Environment::get().getWorld()->getStore().get<ESM::Dialogue>().find (mTopic);
 
         for (std::vector<ESM::DialInfo>::const_iterator iter (dialogue->mInfo.begin());
             iter!=dialogue->mInfo.end(); ++iter)
-            if (iter->questStatus==ESM::DialInfo::QS_Name)
-                return iter->response;
+            if (iter->mQuestStatus==ESM::DialInfo::QS_Name)
+                return iter->mResponse;
 
         return "";
     }
@@ -35,23 +42,27 @@ namespace MWDialogue
 
     void Quest::setIndex (int index)
     {
-        const ESM::Dialogue *dialogue = MWBase::Environment::get().getWorld()->getStore().dialogs.find (mTopic);
+        const ESM::Dialogue *dialogue =
+            MWBase::Environment::get().getWorld()->getStore().get<ESM::Dialogue>().find (mTopic);
 
+        bool found=false;
         for (std::vector<ESM::DialInfo>::const_iterator iter (dialogue->mInfo.begin());
             iter!=dialogue->mInfo.end(); ++iter)
-            if (iter->data.disposition==index && iter->questStatus!=ESM::DialInfo::QS_Name)
+            if (iter->mData.mDisposition==index && iter->mQuestStatus!=ESM::DialInfo::QS_Name)
             {
-                mIndex = index;
-
-                if (iter->questStatus==ESM::DialInfo::QS_Finished)
+                if (iter->mQuestStatus==ESM::DialInfo::QS_Finished)
                     mFinished = true;
-                else if (iter->questStatus==ESM::DialInfo::QS_Restart)
+                else if (iter->mQuestStatus==ESM::DialInfo::QS_Restart)
                     mFinished = false;
 
-                return;
+                found = true;
+                // Don't return here. Quest status may actually be in a different info record, since we don't merge these (yet?)
             }
 
-        throw std::runtime_error ("unknown journal index for topic " + mTopic);
+        if (found)
+            mIndex = index;
+        else
+            throw std::runtime_error ("unknown journal index for topic " + mTopic);
     }
 
     bool Quest::isFinished() const
@@ -63,25 +74,34 @@ namespace MWDialogue
     {
         int index = -1;
 
-        const ESM::Dialogue *dialogue = MWBase::Environment::get().getWorld()->getStore().dialogs.find (entry.mTopic);
+        const ESM::Dialogue *dialogue =
+            MWBase::Environment::get().getWorld()->getStore().get<ESM::Dialogue>().find (entry.mTopic);
 
         for (std::vector<ESM::DialInfo>::const_iterator iter (dialogue->mInfo.begin());
             iter!=dialogue->mInfo.end(); ++iter)
-            if (iter->id==entry.mInfoId)
+            if (iter->mId == entry.mInfoId)
             {
-                index = iter->data.disposition; /// \todo cleanup info structure
+                index = iter->mData.mDisposition; /// \todo cleanup info structure
                 break;
             }
 
         if (index==-1)
             throw std::runtime_error ("unknown journal entry for topic " + mTopic);
 
-        setIndex (index);
+        if (index > mIndex)
+            setIndex (index);
 
         for (TEntryIter iter (mEntries.begin()); iter!=mEntries.end(); ++iter)
-            if (*iter==entry.mInfoId)
+            if (iter->mInfoId==entry.mInfoId)
                 return;
 
-        mEntries.push_back (entry.mInfoId);
+        mEntries.push_back (entry); // we want slicing here
+    }
+
+    void Quest::write (ESM::QuestState& state) const
+    {
+        state.mTopic = getTopic();
+        state.mState = mIndex;
+        state.mFinished = mFinished;
     }
 }

@@ -3,8 +3,13 @@
 
 #include <OgreSceneNode.h>
 
+#include <components/esm/objectstate.hpp>
+
 #include "customdata.hpp"
 #include "cellstore.hpp"
+
+#include "../mwbase/environment.hpp"
+#include "../mwbase/world.hpp"
 
 namespace MWWorld
 {
@@ -16,6 +21,7 @@ namespace MWWorld
         mEnabled = refData.mEnabled;
         mCount = refData.mCount;
         mPosition = refData.mPosition;
+        mLocalRotation = refData.mLocalRotation;
 
         mCustomData = refData.mCustomData ? refData.mCustomData->clone() : 0;
     }
@@ -28,10 +34,33 @@ namespace MWWorld
         mCustomData = 0;
     }
 
+    RefData::RefData()
+    : mBaseNode(0), mHasLocals (false), mEnabled (true), mCount (1), mCustomData (0)
+    {
+        for (int i=0; i<3; ++i)
+        {
+            mLocalRotation.rot[i] = 0;
+            mPosition.pos[i] = 0;
+            mPosition.rot[i] = 0;
+        }
+    }
+
     RefData::RefData (const ESM::CellRef& cellRef)
-    : mBaseNode(0), mHasLocals (false), mEnabled (true), mCount (1), mPosition (cellRef.pos),
+    : mBaseNode(0), mHasLocals (false), mEnabled (true), mCount (1), mPosition (cellRef.mPos),
       mCustomData (0)
-    {}
+    {
+        mLocalRotation.rot[0]=0;
+        mLocalRotation.rot[1]=0;
+        mLocalRotation.rot[2]=0;
+    }
+
+    RefData::RefData (const ESM::ObjectState& objectState)
+    : mBaseNode (0), mHasLocals (false), mEnabled (objectState.mEnabled),
+      mCount (objectState.mCount), mPosition (objectState.mPosition), mCustomData (0)
+    {
+        for (int i=0; i<3; ++i)
+            mLocalRotation.rot[i] = objectState.mLocalRotation[i];
+    }
 
     RefData::RefData (const RefData& refData)
     : mBaseNode(0), mCustomData (0)
@@ -45,6 +74,21 @@ namespace MWWorld
             cleanup();
             throw;
         }
+    }
+
+    void RefData::write (ESM::ObjectState& objectState, const std::string& scriptId) const
+    {
+        objectState.mHasLocals = mHasLocals;
+
+        if (mHasLocals)
+            mLocals.write (objectState.mLocals, scriptId);
+
+        objectState.mEnabled = mEnabled;
+        objectState.mCount = mCount;
+        objectState.mPosition = mPosition;
+
+        for (int i=0; i<3; ++i)
+            objectState.mLocalRotation[i] = mLocalRotation.rot[i];
     }
 
     RefData& RefData::operator= (const RefData& refData)
@@ -73,11 +117,14 @@ namespace MWWorld
         {}
     }
 
-    std::string RefData::getHandle()
+    const std::string &RefData::getHandle()
     {
-        if (!mBaseNode)
-            return "";
-            
+        if(!mBaseNode)
+        {
+            static const std::string empty;
+            return empty;
+        }
+
         return mBaseNode->getName();
     }
 
@@ -107,6 +154,9 @@ namespace MWWorld
 
     void RefData::setCount (int count)
     {
+        if(count == 0)
+            MWBase::Environment::get().getWorld()->removeRefScript(this);
+
         mCount = count;
     }
 
@@ -133,6 +183,11 @@ namespace MWWorld
     ESM::Position& RefData::getPosition()
     {
         return mPosition;
+    }
+
+    LocalRotation& RefData::getLocalRotation()
+    {
+        return mLocalRotation;
     }
 
     void RefData::setCustomData (CustomData *data)

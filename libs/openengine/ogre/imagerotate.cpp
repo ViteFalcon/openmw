@@ -8,6 +8,13 @@
 #include <OgreCamera.h>
 #include <OgreTextureUnitState.h>
 #include <OgreHardwarePixelBuffer.h>
+#include <OgreTechnique.h>
+#include <OgreMaterialManager.h>
+#include <OgreRectangle2D.h>
+#include <OgreSceneNode.h>
+#include <OgreTextureManager.h>
+#include <OgreRenderTexture.h>
+#include <OgreViewport.h>
 
 using namespace Ogre;
 using namespace OEngine::Render;
@@ -15,6 +22,8 @@ using namespace OEngine::Render;
 void ImageRotate::rotate(const std::string& sourceImage, const std::string& destImage, const float angle)
 {
     Root* root = Ogre::Root::getSingletonPtr();
+
+    std::string destImageRot = std::string(destImage) + std::string("_rot");
 
     SceneManager* sceneMgr = root->createSceneManager(ST_GENERIC);
     Camera* camera = sceneMgr->createCamera("ImageRotateCamera");
@@ -48,16 +57,16 @@ void ImageRotate::rotate(const std::string& sourceImage, const std::string& dest
     unsigned int width = sourceTexture->getWidth();
     unsigned int height = sourceTexture->getHeight();
 
-    TexturePtr destTexture = TextureManager::getSingleton().createManual(
-                    destImage,
+    TexturePtr destTextureRot = TextureManager::getSingleton().createManual(
+                    destImageRot,
                     ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
                     TEX_TYPE_2D,
                     width, height,
                     0,
-                    PF_FLOAT16_RGBA,
+                    PF_A8B8G8R8,
                     TU_RENDERTARGET);
 
-    RenderTarget* rtt = destTexture->getBuffer()->getRenderTarget();
+    RenderTarget* rtt = destTextureRot->getBuffer()->getRenderTarget();
     rtt->setAutoUpdated(false);
     Viewport* vp = rtt->addViewport(camera);
     vp->setOverlaysEnabled(false);
@@ -66,7 +75,20 @@ void ImageRotate::rotate(const std::string& sourceImage, const std::string& dest
 
     rtt->update();
 
+    //copy the rotated image to a static texture
+    TexturePtr destTexture = TextureManager::getSingleton().createManual(
+            destImage,
+            ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
+            TEX_TYPE_2D,
+            width, height,
+            0,
+            PF_A8B8G8R8,
+            Ogre::TU_STATIC);
+
+    destTexture->getBuffer()->blit(destTextureRot->getBuffer());
+
     // remove all the junk we've created
+    TextureManager::getSingleton().remove(destImageRot);
     MaterialManager::getSingleton().remove("ImageRotateMaterial");
     root->destroySceneManager(sceneMgr);
     delete rect;

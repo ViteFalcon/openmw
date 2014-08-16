@@ -1,29 +1,42 @@
 #include "core.h"
 
-#define IS_FIRST_PASS 1
+#define IS_FIRST_PASS (@shPropertyString(pass_index) == 0)
 
-#define FOG @shGlobalSettingBool(fog)
-#define MRT @shGlobalSettingBool(mrt_output)
+#define FOG (@shGlobalSettingBool(fog) && !@shPropertyBool(render_composite_map))
 
-#define LIGHTING @shGlobalSettingBool(lighting)
-
-#define SHADOWS_PSSM LIGHTING && @shGlobalSettingBool(shadows_pssm)
-#define SHADOWS LIGHTING && @shGlobalSettingBool(shadows)
+#define SHADOWS_PSSM @shGlobalSettingBool(shadows_pssm)
+#define SHADOWS @shGlobalSettingBool(shadows)
 
 #if SHADOWS || SHADOWS_PSSM
 #include "shadows.h"
 #endif
 
-#define COLOUR_MAP @shPropertyBool(colour_map)
-
 #define NUM_LAYERS @shPropertyString(num_layers)
 
-#if MRT || FOG || SHADOWS_PSSM
+#if FOG || SHADOWS_PSSM
 #define NEED_DEPTH 1
 #endif
 
-#define UNDERWATER @shGlobalSettingBool(underwater_effects) && LIGHTING
+#define UNDERWATER @shGlobalSettingBool(render_refraction)
 
+#define VIEWPROJ_FIX @shGlobalSettingBool(viewproj_fix)
+
+#define RENDERCMP @shPropertyBool(render_composite_map)
+
+#define LIGHTING !RENDERCMP
+
+#define COMPOSITE_MAP @shPropertyBool(display_composite_map)
+
+#define NORMAL_MAP @shPropertyBool(normal_map_enabled)
+#define PARALLAX @shPropertyBool(parallax_enabled)
+
+#define VERTEX_LIGHTING (!NORMAL_MAP)
+
+#define PARALLAX_SCALE 0.04
+#define PARALLAX_BIAS -0.02
+
+// This is just for the permutation handler
+#define NORMAL_MAPS @shPropertyString(normal_maps)
 
 #if NEED_DEPTH
 @shAllocatePassthrough(1, depth)
@@ -31,8 +44,15 @@
 
 @shAllocatePassthrough(2, UV)
 
+@shAllocatePassthrough(3, worldPos)
+
 #if LIGHTING
-@shAllocatePassthrough(3, objSpacePosition)
+@shAllocatePassthrough(3, normalPassthrough)
+#if VERTEX_LIGHTING
+@shAllocatePassthrough(3, lightResult)
+@shAllocatePassthrough(3, directionalResult)
+#else
+@shAllocatePassthrough(3, colourPassthrough)
 #endif
 
 #if SHADOWS
@@ -43,6 +63,7 @@
     @shAllocatePassthrough(4, lightSpacePos@shIterator)
 @shEndForeach
 #endif
+#endif
 
 #ifdef SH_VERTEX_SHADER
 
@@ -52,11 +73,23 @@
         shUniform(float4x4, worldMatrix) @shAutoConstant(worldMatrix, world_matrix)
         shUniform(float4x4, viewProjMatrix) @shAutoConstant(viewProjMatrix, viewproj_matrix)
         
-        shUniform(float2, lodMorph) @shAutoConstant(lodMorph, custom, 1001)
+#if VIEWPROJ_FIX
+        shUniform(float4, vpRow2Fix) @shSharedParameter(vpRow2Fix, vpRow2Fix)
+#endif
         
         shVertexInput(float2, uv0)
-        shVertexInput(float2, uv1) // lodDelta, lodThreshold
-        
+
+#if LIGHTING
+        shNormalInput(float4)
+        shColourInput(float4)
+
+#if VERTEX_LIGHTING
+        shUniform(float4, lightPosition[@shGlobalSettingString(num_lights)]) @shAutoConstant(lightPosition, light_position_object_space_array, @shGlobalSettingString(num_lights))
+        shUniform(float4, lightDiffuse[@shGlobalSettingString(num_lights)]) @shAutoConstant(lightDiffuse, light_diffuse_colour_array, @shGlobalSettingString(num_lights))
+        shUniform(float4, lightAttenuation[@shGlobalSettingString(num_lights)]) @shAutoConstant(lightAttenuation, light_attenuation_array, @shGlobalSettingString(num_lights))
+        shUniform(float4, lightAmbient)                    @shAutoConstant(lightAmbient, ambient_light_colour)
+#endif
+
 #if SHADOWS
         shUniform(float4x4, texViewProjMatrix0) @shAutoConstant(texViewProjMatrix0, texture_viewproj_matrix)
 #endif
@@ -67,42 +100,51 @@
     @shEndForeach
 #endif
 
+#endif
+
         
         @shPassthroughVertexOutputs
 
     SH_START_PROGRAM
     {
-
-
         float4 worldPos = shMatrixMult(worldMatrix, shInputPosition);
-
-        // determine whether to apply the LOD morph to this vertex
-        // we store the deltas against all vertices so we only want to apply 
-        // the morph to the ones which would disappear. The target LOD which is
-        // being morphed to is stored in lodMorph.y, and the LOD at which 
-        // the vertex should be morphed is stored in uv.w. If we subtract
-        // the former from the latter, and arrange to only morph if the
-        // result is negative (it will only be -1 in fact, since after that
-        // the vertex will never be indexed), we will achieve our aim.
-        // sign(vertexLOD - targetLOD) == -1 is to morph
-        float toMorph = -min(0, sign(uv1.y - lodMorph.y));
-
-        // morph
-        // this assumes XZ terrain alignment
-        worldPos.y += uv1.x * toMorph * lodMorph.x;
-
 
         shOutputPosition = shMatrixMult(viewProjMatrix, worldPos);
         
 #if NEED_DEPTH
+#if VIEWPROJ_FIX
+        float4x4 vpFixed = viewProjMatrix;
+#if !SH_GLSL
+        vpFixed[2] = vpRow2Fix;
+#else
+        vpFixed[0][2] = vpRow2Fix.x;
+        vpFixed[1][2] = vpRow2Fix.y;
+        vpFixed[2][2] = vpRow2Fix.z;
+        vpFixed[3][2] = vpRow2Fix.w;
+#endif
+
+        float4x4 fixedWVP = shMatrixMult(vpFixed, worldMatrix);
+
+        float depth = shMatrixMult(fixedWVP, shInputPosition).z;
+        @shPassthroughAssign(depth, depth);
+#else
         @shPassthroughAssign(depth, shOutputPosition.z);
+#endif
+
 #endif
 
         @shPassthroughAssign(UV, uv0);
         
+        @shPassthroughAssign(worldPos, worldPos.xyz);
+
 #if LIGHTING
-        @shPassthroughAssign(objSpacePosition, shInputPosition.xyz);
+        @shPassthroughAssign(normalPassthrough, normal.xyz);
 #endif
+#if LIGHTING && !VERTEX_LIGHTING
+        @shPassthroughAssign(colourPassthrough, colour.xyz);
+#endif
+
+#if LIGHTING
 
 #if SHADOWS
         float4 lightSpacePos = shMatrixMult(texViewProjMatrix0, shMatrixMult(worldMatrix, shInputPosition));
@@ -118,6 +160,36 @@
     @shEndForeach
 #endif
 
+
+#if VERTEX_LIGHTING
+        // Lighting
+        float3 lightDir;
+        float d;
+        float3 lightResult = float3(0,0,0);
+        float3 directionalResult = float3(0,0,0);
+        @shForeach(@shGlobalSettingString(num_lights))
+            lightDir = lightPosition[@shIterator].xyz - (shInputPosition.xyz * lightPosition[@shIterator].w);
+            d = length(lightDir);
+            lightDir = normalize(lightDir);
+
+
+            lightResult.xyz += lightDiffuse[@shIterator].xyz
+                    * shSaturate(1.0 / ((lightAttenuation[@shIterator].y) + (lightAttenuation[@shIterator].z * d) + (lightAttenuation[@shIterator].w * d * d)))
+                    * max(dot(normal.xyz, lightDir), 0);
+
+#if @shIterator == 0
+            directionalResult = lightResult.xyz;
+#endif
+        @shEndForeach
+        lightResult.xyz += lightAmbient.xyz;
+        lightResult.xyz *= colour.xyz;
+        directionalResult.xyz *= colour.xyz;
+
+        @shPassthroughAssign(lightResult, lightResult);
+        @shPassthroughAssign(directionalResult, directionalResult);
+#endif
+
+#endif
     }
 
 #else
@@ -131,12 +203,9 @@
     SH_BEGIN_PROGRAM
     
     
-#if COLOUR_MAP
-        shSampler2D(colourMap)
-#endif
-
-        shSampler2D(normalMap) // global normal map
-        
+#if COMPOSITE_MAP
+        shSampler2D(compositeMap)
+#else
 
 @shForeach(@shPropertyString(num_blendmaps))
         shSampler2D(blendMap@shIterator)
@@ -144,7 +213,12 @@
 
 @shForeach(@shPropertyString(num_layers))
         shSampler2D(diffuseMap@shIterator)
+#if @shPropertyBool(use_normal_map_@shIterator)
+        shSampler2D(normalMap@shIterator)
+#endif
 @shEndForeach
+
+#endif
     
 #if FOG
         shUniform(float3, fogColour) @shAutoConstant(fogColour, fog_colour)
@@ -152,22 +226,16 @@
 #endif
     
         @shPassthroughFragmentInputs
-    
-#if MRT
-        shDeclareMrtOutput(1)
-        shUniform(float, far) @shAutoConstant(far, far_clip_distance)
-#endif
-
 
 #if LIGHTING
-        shUniform(float4, lightAmbient)                       @shAutoConstant(lightAmbient, ambient_light_colour)
-    @shForeach(@shGlobalSettingString(terrain_num_lights))
-        shUniform(float4, lightPosObjSpace@shIterator)        @shAutoConstant(lightPosObjSpace@shIterator, light_position_object_space, @shIterator)
-        shUniform(float4, lightAttenuation@shIterator)        @shAutoConstant(lightAttenuation@shIterator, light_attenuation, @shIterator)
-        shUniform(float4, lightDiffuse@shIterator)            @shAutoConstant(lightDiffuse@shIterator, light_diffuse_colour, @shIterator)
-    @shEndForeach
-#endif
 
+#if !VERTEX_LIGHTING
+shUniform(float4, lightPosition[@shGlobalSettingString(num_lights)]) @shAutoConstant(lightPosition, light_position_array, @shGlobalSettingString(num_lights))
+shUniform(float4, lightDiffuse[@shGlobalSettingString(num_lights)]) @shAutoConstant(lightDiffuse, light_diffuse_colour_array, @shGlobalSettingString(num_lights))
+shUniform(float4, lightAttenuation[@shGlobalSettingString(num_lights)]) @shAutoConstant(lightAttenuation, light_attenuation_array, @shGlobalSettingString(num_lights))
+shUniform(float4, lightAmbient)                    @shAutoConstant(lightAmbient, ambient_light_colour)
+shUniform(float4x4, worldView) @shAutoConstant(worldView, worldview_matrix)
+#endif
 
 #if SHADOWS
         shSampler2D(shadowMap0)
@@ -184,22 +252,24 @@
 #if SHADOWS || SHADOWS_PSSM
         shUniform(float4, shadowFar_fadeStart) @shSharedParameter(shadowFar_fadeStart)
 #endif
-
-
-#if UNDERWATER
-        shUniform(float4x4, worldMatrix) @shAutoConstant(worldMatrix, world_matrix)
-        shUniform(float, waterLevel) @shSharedParameter(waterLevel)
-        shUniform(float4, cameraPos) @shAutoConstant(cameraPos, camera_position) 
-        shUniform(float4, lightDirectionWS0) @shAutoConstant(lightDirectionWS0, light_position, 0)
-        
-        shSampler2D(causticMap)
-        
-		shUniform(float, waterTimer) @shSharedParameter(waterTimer)
-        shUniform(float2, waterSunFade_sunHeight) @shSharedParameter(waterSunFade_sunHeight)
-        		
-		shUniform(float3, windDir_windSpeed) @shSharedParameter(windDir_windSpeed)
 #endif
 
+#if (UNDERWATER) || (FOG)
+        shUniform(float4x4, worldMatrix) @shAutoConstant(worldMatrix, world_matrix)
+#endif
+
+#if UNDERWATER
+        shUniform(float, waterLevel) @shSharedParameter(waterLevel)
+#endif
+
+
+// For specular
+#if LIGHTING
+    shUniform(float3, lightSpec0) @shAutoConstant(lightSpec0, light_specular_colour, 0)
+    shUniform(float3, lightPos0) @shAutoConstant(lightPos0, light_position, 0)
+#endif
+
+shUniform(float4, cameraPos) @shAutoConstant(cameraPos, camera_position)
 
     SH_START_PROGRAM
     {
@@ -210,66 +280,140 @@
 
         float2 UV = @shPassthroughReceive(UV);
         
-#if LIGHTING
-        float3 objSpacePosition = @shPassthroughReceive(objSpacePosition);
+        float3 worldPos = @shPassthroughReceive(worldPos);
 
-        float3 normal = shSample(normalMap, UV).rgb * 2 - 1;
-        normal = normalize(normal);
+#if LIGHTING
+        float3 normal = @shPassthroughReceive(normalPassthrough);
 #endif
-        
-        
-        
-        float3 caustics = float3(1,1,1);
+
+#if LIGHTING && !VERTEX_LIGHTING
+
+#if NORMAL_MAP
+        // derive the tangent space basis
+        float3 tangent = float3(1,0, 0);
+
+        float3 binormal = normalize(cross(tangent, normal));
+        tangent = normalize(cross(normal, binormal)); // note, now we need to re-cross to derive tangent again because it wasn't orthonormal
+
+        // derive final matrix
+        float3x3 tbn = float3x3(tangent, binormal, normal);
+        #if SH_GLSL
+        tbn = transpose(tbn);
+        #endif
+#endif
+
+#endif
+
 #if UNDERWATER
-
-        float3 worldPos = shMatrixMult(worldMatrix, float4(objSpacePosition,1)).xyz;
-        float3 waterEyePos = float3(1,1,1);
-        // NOTE: this calculation would be wrong for non-uniform scaling
-        float4 worldNormal = shMatrixMult(worldMatrix, float4(normal.xyz, 0));
-        waterEyePos = intercept(worldPos, cameraPos.xyz - worldPos, float3(0,1,0), waterLevel);
-        caustics = getCaustics(causticMap, worldPos, waterEyePos.xyz, worldNormal.xyz, lightDirectionWS0.xyz, waterLevel, waterTimer, windDir_windSpeed);
-        if (worldPos.y >= waterLevel)
-            caustics = float3(1,1,1);
-        
-
-
+        float3 waterEyePos = intercept(worldPos, cameraPos.xyz - worldPos, float3(0,0,1), waterLevel);
 #endif
-        
-        
-        // Layer calculations 
-@shForeach(@shPropertyString(num_blendmaps))
-        float4 blendValues@shIterator = shSample(blendMap@shIterator, UV);
-@shEndForeach
 
-        float3 albedo = float3(0,0,0);
-@shForeach(@shPropertyString(num_layers))
+#if !IS_FIRST_PASS
+// Opacity the previous passes should have, i.e. 1 - (opacity of this pass)
+float previousAlpha = 1.f;
+#endif
 
 
-#if IS_FIRST_PASS == 1 && @shIterator == 0
-        // first layer of first pass doesn't need a blend map
-        albedo = shSample(diffuseMap0, UV * 10).rgb;
+shOutputColour(0) = float4(1,1,1,1);
+
+float3 TSnormal = float3(0,0,1);
+
+#if COMPOSITE_MAP
+        shOutputColour(0).xyz = shSample(compositeMap, UV).xyz;
 #else
-        albedo = shLerp(albedo, shSample(diffuseMap@shIterator, UV * 10).rgb, blendValues@shPropertyString(blendmap_component_@shIterator));
 
+        // Layer calculations 
+// rescale UV to directly map edge vertices to texel centers - this is
+// important to get correct blending at cell transitions
+// TODO: parameterize texel size
+float2 blendUV = (UV - 0.5) * (16.0 / (16.0+1.0)) + 0.5;
+@shForeach(@shPropertyString(num_blendmaps))
+        float4 blendValues@shIterator = shSaturate(shSample(blendMap@shIterator, blendUV));
+@shEndForeach
+
+
+        float4 albedo = float4(0,0,0,1);
+
+        float2 layerUV = float2(UV.x, 1.f-UV.y) * 16; // Reverse Y, required to get proper tangents
+        float2 thisLayerUV;
+        float4 normalTex;
+        float4 diffuseTex;
+
+        float3 eyeDir = normalize(cameraPos.xyz - worldPos);
+#if PARALLAX
+        float3 TSeyeDir = normalize(shMatrixMult(tbn, eyeDir));
 #endif
+
+@shForeach(@shPropertyString(num_layers))
+        thisLayerUV = layerUV;
+#if @shPropertyBool(use_normal_map_@shIterator)
+        normalTex = shSample(normalMap@shIterator, thisLayerUV);
+#if @shIterator == 0 && IS_FIRST_PASS
+        TSnormal = normalize(normalTex.xyz * 2 - 1);
+#else
+        TSnormal = shLerp(TSnormal, normalTex.xyz * 2 - 1, blendValues@shPropertyString(blendmap_component_@shIterator));
+#endif
+#endif
+
+#if @shPropertyBool(use_parallax_@shIterator)
+        thisLayerUV += TSeyeDir.xy * ( normalTex.a * PARALLAX_SCALE + PARALLAX_BIAS );
+#endif
+
+        diffuseTex = shSample(diffuseMap@shIterator, layerUV);
+#if !@shPropertyBool(use_specular_@shIterator)
+        diffuseTex.a = 0;
+#endif
+
+#if @shIterator == 0
+albedo = diffuseTex;
+#else
+albedo = shLerp(albedo, diffuseTex, blendValues@shPropertyString(blendmap_component_@shIterator));
+#endif
+
+#if !IS_FIRST_PASS
+        previousAlpha *= 1.f-blendValues@shPropertyString(blendmap_component_@shIterator);
+#endif
+
+
 @shEndForeach
         
-        shOutputColour(0) = float4(1,1,1,1);
+        shOutputColour(0).rgb *= albedo.xyz;
         
-#if COLOUR_MAP
-        shOutputColour(0).rgb *= shSample(colourMap, UV).rgb;
 #endif
 
-        shOutputColour(0).rgb *= albedo;
-        
-        
-        
-        
-        
-        
-        // Lighting 
-        
 #if LIGHTING
+
+#if VERTEX_LIGHTING
+        // Lighting 
+        float3 lightResult = @shPassthroughReceive(lightResult);
+        float3 directionalResult = @shPassthroughReceive(directionalResult);
+#else
+
+#if NORMAL_MAP
+        normal = normalize (shMatrixMult( transpose(tbn), TSnormal ));
+#endif
+
+        float3 colour = @shPassthroughReceive(colourPassthrough);
+        float3 lightDir;
+        float d;
+        float3 lightResult = float3(0,0,0);
+        @shForeach(@shGlobalSettingString(num_lights))
+            lightDir = lightPosition[@shIterator].xyz - (worldPos * lightPosition[@shIterator].w);
+            d = length(lightDir);
+            lightDir = normalize(lightDir);
+
+            lightResult.xyz += lightDiffuse[@shIterator].xyz
+                    * shSaturate(1.0 / ((lightAttenuation[@shIterator].y) + (lightAttenuation[@shIterator].z * d) + (lightAttenuation[@shIterator].w * d * d)))
+                    * max(dot(normal.xyz, lightDir), 0);
+#if @shIterator == 0
+            float3 directionalResult = lightResult.xyz;
+#endif
+        @shEndForeach
+        lightResult.xyz += lightAmbient.xyz;
+        lightResult.xyz *= colour.xyz;
+        directionalResult.xyz *= colour.xyz;
+#endif
+
         // shadows only for the first (directional) light
 #if SHADOWS
             float4 lightSpacePos0 = @shPassthroughReceive(lightSpacePos0);
@@ -293,85 +437,37 @@
             float shadow = 1.0;
 #endif
 
-
-
-        float3 lightDir;
-        float3 diffuse = float3(0,0,0);
-        float d;
-        
-    @shForeach(@shGlobalSettingString(terrain_num_lights))
-    
-        lightDir = lightPosObjSpace@shIterator.xyz - (objSpacePosition.xyz * lightPosObjSpace@shIterator.w);
-        d = length(lightDir);
-       
-        
-        lightDir = normalize(lightDir);
-
-#if @shIterator == 0
-
-    #if (SHADOWS || SHADOWS_PSSM)
-        diffuse += lightDiffuse@shIterator.xyz * (1.0 / ((lightAttenuation@shIterator.y) + (lightAttenuation@shIterator.z * d) + (lightAttenuation@shIterator.w * d * d))) * max(dot(normal, lightDir), 0) * shadow * caustics;
-        
-    #else
-        diffuse += lightDiffuse@shIterator.xyz * (1.0 / ((lightAttenuation@shIterator.y) + (lightAttenuation@shIterator.z * d) + (lightAttenuation@shIterator.w * d * d))) * max(dot(normal, lightDir), 0) * caustics;
-        
-    #endif
-    
-#else
-        diffuse += lightDiffuse@shIterator.xyz * (1.0 / ((lightAttenuation@shIterator.y) + (lightAttenuation@shIterator.z * d) + (lightAttenuation@shIterator.w * d * d))) * max(dot(normal, lightDir), 0);
+        shOutputColour(0).xyz *= (lightResult - directionalResult * (1.0-shadow));
 #endif
 
-    @shEndForeach
-    
-        shOutputColour(0).xyz *= (lightAmbient.xyz + diffuse);
+#if LIGHTING && !COMPOSITE_MAP
+        // Specular
+        float3 light0Dir = normalize(lightPos0.xyz);
+
+        float NdotL = max(dot(normal, light0Dir), 0);
+        float3 halfVec = normalize (light0Dir + eyeDir);
+
+        float3 specular = pow(max(dot(normal, halfVec), 0), 32) * lightSpec0;
+        shOutputColour(0).xyz += specular * (albedo.a) * shadow;
 #endif
-    
-    
-    
-        
+
 #if FOG
         float fogValue = shSaturate((depth - fogParams.y) * fogParams.w);
         
         #if UNDERWATER
-        // regular fog only if fragment is above water
-        if (worldPos.y > waterLevel)
-        #endif
+        shOutputColour(0).xyz = shLerp (shOutputColour(0).xyz, UNDERWATER_COLOUR, shSaturate(length(waterEyePos-worldPos) / VISIBILITY));
+        #else
         shOutputColour(0).xyz = shLerp (shOutputColour(0).xyz, fogColour, fogValue);
+        #endif
 #endif
 
         // prevent negative colour output (for example with negative lights)
         shOutputColour(0).xyz = max(shOutputColour(0).xyz, float3(0,0,0));
-        
-#if UNDERWATER
-        float fogAmount = (cameraPos.y > waterLevel)
-             ? shSaturate(length(waterEyePos-worldPos) / VISIBILITY) 
-             : shSaturate(length(cameraPos.xyz-worldPos)/ VISIBILITY);
-             
-        float3 eyeVec = normalize(cameraPos.xyz-worldPos);
-        
-        float waterSunGradient = dot(eyeVec, -normalize(lightDirectionWS0.xyz));
-        waterSunGradient = shSaturate(pow(waterSunGradient*0.7+0.3,2.0));  
-        float3 waterSunColour = float3(0.0,1.0,0.85)*waterSunGradient * 0.5;
-        
-        float waterGradient = dot(eyeVec, float3(0.0,-1.0,0.0));
-        waterGradient = clamp((waterGradient*0.5+0.5),0.2,1.0);
-        float3 watercolour = (float3(0.0078, 0.5176, 0.700)+waterSunColour)*waterGradient*2.0;
-        float3 waterext = float3(0.6, 0.9, 1.0);//water extinction
-        watercolour = shLerp(watercolour*0.3*waterSunFade_sunHeight.x, watercolour, shSaturate(1.0-exp(-waterSunFade_sunHeight.y*SUN_EXT)));
-        watercolour = (cameraPos.y <= waterLevel) ? watercolour : watercolour*0.3;
-    
-    
-        float darkness = VISIBILITY*2.0;
-        darkness = clamp((waterEyePos.y - waterLevel + darkness)/darkness,0.2,1.0);
-        watercolour *= darkness;
 
-        float isUnderwater = (worldPos.y < waterLevel) ? 1.0 : 0.0;
-        shOutputColour(0).xyz = shLerp (shOutputColour(0).xyz, watercolour, fogAmount * isUnderwater);
-#endif
-
-
-#if MRT
-        shOutputColour(1) = float4(depth / far,1,1,1);
+#if IS_FIRST_PASS
+        shOutputColour(0).a = 1;
+#else
+        shOutputColour(0).a = 1.f-previousAlpha;
 #endif
     }
 

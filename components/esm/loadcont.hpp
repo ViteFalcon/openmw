@@ -1,10 +1,16 @@
-#ifndef _ESM_CONT_H
-#define _ESM_CONT_H
+#ifndef OPENMW_ESM_CONT_H
+#define OPENMW_ESM_CONT_H
 
-#include "esm_reader.hpp"
+#include <string>
+#include <vector>
+
+#include "esmcommon.hpp"
 
 namespace ESM
 {
+
+class ESMReader;
+class ESMWriter;
 
 /*
  * Container definition
@@ -12,19 +18,22 @@ namespace ESM
 
 struct ContItem
 {
-    int count;
-    NAME32 item;
+    int mCount;
+    NAME32 mItem;
 };
 
 struct InventoryList
 {
-    std::vector<ContItem> list;
+    std::vector<ContItem> mList;
 
     void load(ESMReader &esm);
+    void save(ESMWriter &esm) const;
 };
 
 struct Container
 {
+    static unsigned int sRecordId;
+
     enum Flags
     {
         Organic = 1, // Objects cannot be placed in this container
@@ -32,13 +41,17 @@ struct Container
         Unknown = 8
     };
 
-    std::string name, model, script;
+    std::string mId, mName, mModel, mScript;
 
-    float weight; // Not sure, might be max total weight allowed?
-    int flags;
-    InventoryList inventory;
+    float mWeight; // Not sure, might be max total weight allowed?
+    int mFlags;
+    InventoryList mInventory;
 
     void load(ESMReader &esm);
+    void save(ESMWriter &esm) const;
+
+    void blank();
+    ///< Set record to default state (does not touch the ID).
 };
 }
 #endif

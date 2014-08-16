@@ -1,7 +1,6 @@
 #ifndef MWGUI_CONSOLE_H
 #define MWGUI_CONSOLE_H
 
-#include <openengine/gui/layout.hpp>
 #include <list>
 #include <string>
 #include <vector>
@@ -18,10 +17,11 @@
 #include "../mwscript/interpretercontext.hpp"
 
 #include "referenceinterface.hpp"
+#include "windowbase.hpp"
 
 namespace MWGui
 {
-  class Console : private OEngine::GUI::Layout, private Compiler::ErrorHandler, public ReferenceInterface
+  class Console : public WindowBase, private Compiler::ErrorHandler, public ReferenceInterface
   {
     private:
 
@@ -55,21 +55,20 @@ namespace MWGui
 
 
     public:
-    MyGUI::EditPtr command;
-    MyGUI::EditPtr history;
+    MyGUI::EditBox* mCommandLine;
+    MyGUI::EditBox* mHistory;
 
     typedef std::list<std::string> StringList;
 
     // History of previous entered commands
-    StringList command_history;
-    StringList::iterator current;
-    std::string editString;
+    StringList mCommandHistory;
+    StringList::iterator mCurrent;
+    std::string mEditString;
 
     Console(int w, int h, bool consoleOnlyScripts);
 
-    void enable();
-
-    void disable();
+    virtual void open();
+    virtual void close();
 
     void setFont(const std::string &fntName);
 
@@ -91,15 +90,15 @@ namespace MWGui
 
     void execute (const std::string& command);
 
-    void executeFile (const std::string& command);
+    void executeFile (const std::string& path);
 
   private:
 
-    void keyPress(MyGUI::WidgetPtr _sender,
+    void keyPress(MyGUI::Widget* _sender,
                   MyGUI::KeyCode key,
                   MyGUI::Char _char);
 
-    void acceptCommand(MyGUI::EditPtr _sender);
+    void acceptCommand(MyGUI::EditBox* _sender);
 
     std::string complete( std::string input, std::vector<std::string> &matches );
   };

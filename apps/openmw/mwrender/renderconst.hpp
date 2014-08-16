@@ -20,7 +20,7 @@ enum RenderQueueGroups
 
     RQG_UnderWater = Ogre::RENDER_QUEUE_4,
 
-    RQG_Water = Ogre::RENDER_QUEUE_7+1,
+    RQG_Water = RQG_Alpha,
 
     // Sky late (sun & sun flare)
     RQG_SkiesLate = Ogre::RENDER_QUEUE_SKIES_LATE
@@ -54,11 +54,15 @@ enum VisibilityFlags
 
     RV_OcclusionQuery = 256,
 
-    RV_PlayerPreview = 512,
+    RV_Debug = 512,
+
+    // overlays, we only want these on the main render target
+    RV_Overlay = 1024,
+
+    // First person meshes do not cast shadows
+    RV_FirstPerson = 2048,
 
     RV_Map = RV_Terrain + RV_Statics + RV_StaticsSmall + RV_Misc + RV_Water
-
-    /// \todo markers (normally hidden)
 };
 
 }

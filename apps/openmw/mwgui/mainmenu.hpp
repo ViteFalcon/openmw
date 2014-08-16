@@ -1,29 +1,49 @@
+#ifndef OPENMW_GAME_MWGUI_MAINMENU_H
+#define OPENMW_GAME_MWGUI_MAINMENU_H
+
 #include <openengine/gui/layout.hpp>
+
+#include "imagebutton.hpp"
 
 namespace MWGui
 {
 
+    class SaveGameDialog;
+
     class MainMenu : public OEngine::GUI::Layout
     {
-    public:
-        MainMenu(int w, int h);
+            int mWidth;
+            int mHeight;
 
-        void onResChange(int w, int h);
+        public:
 
-    private:
-        MyGUI::Button* mReturn;
-        MyGUI::Button* mNewGame;
-        MyGUI::Button* mLoadGame;
-        MyGUI::Button* mSaveGame;
-        MyGUI::Button* mOptions;
-        MyGUI::Button* mCredits;
-        MyGUI::Button* mExitGame;
+            MainMenu(int w, int h);
+            ~MainMenu();
 
-        MyGUI::Widget* mButtonBox;
+            void onResChange(int w, int h);
 
-        void returnToGame(MyGUI::Widget* sender);
-        void showOptions(MyGUI::Widget* sender);
-        void exitGame(MyGUI::Widget* sender);
+            virtual void setVisible (bool visible);
+
+        private:
+
+            MyGUI::Widget* mButtonBox;
+            MyGUI::TextBox* mVersionText;
+
+            MyGUI::ImageBox* mBackground;
+
+            std::map<std::string, MWGui::ImageButton*> mButtons;
+
+            void onButtonClicked (MyGUI::Widget* sender);
+            void onNewGameConfirmed();
+            void onExitConfirmed();
+
+            void showBackground(bool show);
+
+            void updateMenu();
+
+            SaveGameDialog* mSaveGameDialog;
     };
 
 }
+
+#endif

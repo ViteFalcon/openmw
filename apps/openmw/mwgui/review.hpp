@@ -1,8 +1,7 @@
 #ifndef MWGUI_REVIEW_H
 #define MWGUI_REVIEW_H
 
-#include "window_base.hpp"
-#include "../mwmechanics/stat.hpp"
+#include "windowbase.hpp"
 #include "widgets.hpp"
 
 namespace MWGui
@@ -17,7 +16,7 @@ Layout is defined by resources/mygui/openmw_chargen_review.layout.
 
 namespace MWGui
 {
-    class ReviewDialog : public WindowBase
+    class ReviewDialog : public WindowModal
     {
     public:
         enum Dialogs {
@@ -28,7 +27,7 @@ namespace MWGui
         };
         typedef std::vector<int> SkillList;
 
-        ReviewDialog(MWBase::WindowManager& parWindowManager);
+        ReviewDialog();
 
         void setPlayerName(const std::string &name);
         void setRace(const std::string &raceId);
@@ -39,10 +38,10 @@ namespace MWGui
         void setMagicka(const MWMechanics::DynamicStat<float>& value);
         void setFatigue(const MWMechanics::DynamicStat<float>& value);
 
-        void setAttribute(ESM::Attribute::AttributeID attributeId, const MWMechanics::Stat<int>& value);
+        void setAttribute(ESM::Attribute::AttributeID attributeId, const MWMechanics::AttributeValue& value);
 
         void configureSkills(const SkillList& major, const SkillList& minor);
-        void setSkillValue(ESM::Skill::SkillEnum skillId, const MWMechanics::Stat<float>& value);
+        void setSkillValue(ESM::Skill::SkillEnum skillId, const MWMechanics::SkillValue& value);
 
         virtual void open();
 
@@ -80,18 +79,17 @@ namespace MWGui
 
         MyGUI::TextBox *mNameWidget, *mRaceWidget, *mClassWidget, *mBirthSignWidget;
         MyGUI::ScrollView* mSkillView;
-        int mLastPos, mClientHeight;
 
         Widgets::MWDynamicStatPtr mHealth, mMagicka, mFatigue;
 
         std::map<int, Widgets::MWAttributePtr> mAttributeWidgets;
 
         SkillList mMajorSkills, mMinorSkills, mMiscSkills;
-        std::map<int, MWMechanics::Stat<float> > mSkillValues;
+        std::map<int, MWMechanics::SkillValue > mSkillValues;
         std::map<int, MyGUI::TextBox*> mSkillWidgetMap;
         std::string mName, mRaceId, mBirthSignId;
         ESM::Class mKlass;
-        std::vector<MyGUI::WidgetPtr> mSkillWidgets; //< Skills and other information
+        std::vector<MyGUI::Widget*> mSkillWidgets; //< Skills and other information
     };
 }
 #endif

@@ -1,22 +1,19 @@
 #include "settingswindow.hpp"
 
 #include <OgreRoot.h>
-#include <OgreRenderSystem.h>
-#include <OgreString.h>
+#include <OgrePlugin.h>
 
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/math/common_factor_rt.hpp>
 
-#include <components/settings/settings.hpp>
+#include <SDL_video.h>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwbase/soundmanager.hpp"
 #include "../mwbase/inputmanager.hpp"
 #include "../mwbase/windowmanager.hpp"
-
-#include "../mwrender/renderingmanager.hpp"
 
 #include "confirmationdialog.hpp"
 
@@ -34,9 +31,7 @@ namespace
 
     std::string textureFilteringToStr(const std::string& val)
     {
-        if (val == "none")
-            return "None";
-        else if (val == "anisotropic")
+        if (val == "anisotropic")
             return "Anisotropic";
         else if (val == "bilinear")
             return "Bilinear";
@@ -77,102 +72,141 @@ namespace
     {
         return (Ogre::Root::getSingleton ().getRenderSystem ()->getName ().find("OpenGL") != std::string::npos) ? "glsl" : "hlsl";
     }
+
+    bool cgAvailable ()
+    {
+        Ogre::Root::PluginInstanceList list = Ogre::Root::getSingleton ().getInstalledPlugins ();
+        for (Ogre::Root::PluginInstanceList::const_iterator it = list.begin(); it != list.end(); ++it)
+        {
+            if ((*it)->getName() == "Cg Program Manager")
+                return true;
+        }
+        return false;
+    }
+
+    const char* checkButtonType = "CheckButton";
+    const char* sliderType = "Slider";
+
+    std::string getSettingType(MyGUI::Widget* widget)
+    {
+        return widget->getUserString("SettingType");
+    }
+
+    std::string getSettingName(MyGUI::Widget* widget)
+    {
+        return widget->getUserString("SettingName");
+    }
+
+    std::string getSettingCategory(MyGUI::Widget* widget)
+    {
+        return widget->getUserString("SettingCategory");
+    }
+
+    std::string getSettingValueType(MyGUI::Widget* widget)
+    {
+        return widget->getUserString("SettingValueType");
+    }
+
+    void getSettingMinMax(MyGUI::Widget* widget, float& min, float& max)
+    {
+        const char* settingMin = "SettingMin";
+        const char* settingMax = "SettingMax";
+        min = 0.f;
+        max = 1.f;
+        if (!widget->getUserString(settingMin).empty())
+            min = boost::lexical_cast<float>(widget->getUserString(settingMin));
+        if (!widget->getUserString(settingMax).empty())
+            max = boost::lexical_cast<float>(widget->getUserString(settingMax));
+    }
 }
 
 namespace MWGui
 {
-    SettingsWindow::SettingsWindow(MWBase::WindowManager& parWindowManager) :
-        WindowBase("openmw_settings_window.layout", parWindowManager)
+    void SettingsWindow::configureWidgets(MyGUI::Widget* widget)
     {
+        MyGUI::EnumeratorWidgetPtr widgets = widget->getEnumerator();
+        while (widgets.next())
+        {
+            MyGUI::Widget* current = widgets.current();
+
+            std::string type = getSettingType(current);
+            if (type == checkButtonType)
+            {
+                std::string initialValue = Settings::Manager::getBool(getSettingName(current),
+                                                                      getSettingCategory(current))
+                        ? "#{sOn}" : "#{sOff}";
+                current->castType<MyGUI::Button>()->setCaptionWithReplacing(initialValue);
+                current->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
+            }
+            if (type == sliderType)
+            {
+                MyGUI::ScrollBar* scroll = current->castType<MyGUI::ScrollBar>();
+                if (getSettingValueType(current) == "Float")
+                {
+                    // TODO: ScrollBar isn't meant for this. should probably use a dedicated FloatSlider widget
+                    float min,max;
+                    getSettingMinMax(scroll, min, max);
+                    float value = Settings::Manager::getFloat(getSettingName(current), getSettingCategory(current));
+                    value = (value-min)/(max-min);
+
+                    scroll->setScrollPosition( value * (scroll->getScrollRange()-1));
+                }
+                else
+                {
+                    int value = Settings::Manager::getFloat(getSettingName(current), getSettingCategory(current));
+                    scroll->setScrollPosition(value);
+                }
+                scroll->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
+            }
+
+            configureWidgets(current);
+        }
+    }
+
+    SettingsWindow::SettingsWindow() :
+        WindowBase("openmw_settings_window.layout")
+    {
+        configureWidgets(mMainWidget);
+
         getWidget(mOkButton, "OkButton");
-        getWidget(mSubtitlesButton, "SubtitlesButton");
-        getWidget(mCrosshairButton, "CrosshairButton");
         getWidget(mResolutionList, "ResolutionList");
-        getWidget(mMenuTransparencySlider, "MenuTransparencySlider");
-        getWidget(mToolTipDelaySlider, "ToolTipDelaySlider");
-        getWidget(mViewDistanceSlider, "ViewDistanceSlider");
         getWidget(mFullscreenButton, "FullscreenButton");
         getWidget(mVSyncButton, "VSyncButton");
         getWidget(mFPSButton, "FPSButton");
         getWidget(mFOVSlider, "FOVSlider");
-        getWidget(mMasterVolumeSlider, "MasterVolume");
-        getWidget(mVoiceVolumeSlider, "VoiceVolume");
-        getWidget(mEffectsVolumeSlider, "EffectsVolume");
-        getWidget(mFootstepsVolumeSlider, "FootstepsVolume");
-        getWidget(mMusicVolumeSlider, "MusicVolume");
         getWidget(mAnisotropySlider, "AnisotropySlider");
         getWidget(mTextureFilteringButton, "TextureFilteringButton");
         getWidget(mAnisotropyLabel, "AnisotropyLabel");
         getWidget(mAnisotropyBox, "AnisotropyBox");
-        getWidget(mWaterShaderButton, "WaterShaderButton");
-        getWidget(mReflectObjectsButton, "ReflectObjectsButton");
-        getWidget(mReflectActorsButton, "ReflectActorsButton");
-        getWidget(mReflectTerrainButton, "ReflectTerrainButton");
         getWidget(mShadersButton, "ShadersButton");
+        getWidget(mShaderModeButton, "ShaderModeButton");
         getWidget(mShadowsEnabledButton, "ShadowsEnabledButton");
-        getWidget(mShadowsLargeDistance, "ShadowsLargeDistance");
         getWidget(mShadowsTextureSize, "ShadowsTextureSize");
-        getWidget(mActorShadows, "ActorShadows");
-        getWidget(mStaticsShadows, "StaticsShadows");
-        getWidget(mMiscShadows, "MiscShadows");
-        getWidget(mShadowsDebug, "ShadowsDebug");
-        getWidget(mUnderwaterButton, "UnderwaterButton");
         getWidget(mControlsBox, "ControlsBox");
         getWidget(mResetControlsButton, "ResetControlsButton");
-        getWidget(mInvertYButton, "InvertYButton");
-        getWidget(mUISensitivitySlider, "UISensitivitySlider");
-        getWidget(mCameraSensitivitySlider, "CameraSensitivitySlider");
+        getWidget(mRefractionButton, "RefractionButton");
 
-        mSubtitlesButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mCrosshairButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mInvertYButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
         mOkButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onOkButtonClicked);
-        mUnderwaterButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mShadersButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onShadersToggled);
-        mFullscreenButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mWaterShaderButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mReflectObjectsButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mReflectTerrainButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mReflectActorsButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mTextureFilteringButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onTextureFilteringToggled);
-        mVSyncButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
+        mShaderModeButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onShaderModeToggled);
+        mTextureFilteringButton->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onTextureFilteringChanged);
         mFPSButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onFpsToggled);
-        mMenuTransparencySlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
-        mFOVSlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
-        mToolTipDelaySlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
-        mViewDistanceSlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
         mResolutionList->eventListChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onResolutionSelected);
-        mAnisotropySlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
 
-        mShadowsEnabledButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mShadowsLargeDistance->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mShadowsTextureSize->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onShadowTextureSize);
-        mActorShadows->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mStaticsShadows->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mMiscShadows->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-        mShadowsDebug->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onButtonToggled);
-
-        mMasterVolumeSlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
-        mVoiceVolumeSlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
-        mEffectsVolumeSlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
-        mFootstepsVolumeSlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
-        mMusicVolumeSlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
+        mShadowsTextureSize->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onShadowTextureSizeChanged);
 
         center();
 
         mResetControlsButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onResetDefaultBindings);
 
         // fill resolution list
-        Ogre::RenderSystem* rs = Ogre::Root::getSingleton().getRenderSystem();
-        Ogre::StringVector videoModes = rs->getConfigOptions()["Video Mode"].possibleValues;
+        int screen = Settings::Manager::getInt("screen", "Video");
+        int numDisplayModes = SDL_GetNumDisplayModes(screen);
         std::vector < std::pair<int, int> > resolutions;
-        for (Ogre::StringVector::const_iterator it=videoModes.begin();
-            it!=videoModes.end(); ++it)
+        for (int i = 0; i < numDisplayModes; i++)
         {
-
-            int resX, resY;
-            parseResolution (resX, resY, *it);
-            resolutions.push_back(std::make_pair(resX, resY));
+            SDL_DisplayMode mode;
+            SDL_GetDisplayMode(screen, i, &mode);
+            resolutions.push_back(std::make_pair(mode.w, mode.h));
         }
         std::sort(resolutions.begin(), resolutions.end(), sortResolutions);
         for (std::vector < std::pair<int, int> >::const_iterator it=resolutions.begin();
@@ -185,92 +219,30 @@ namespace MWGui
                 mResolutionList->addItem(str);
         }
 
-        // read settings
-        int menu_transparency = (mMenuTransparencySlider->getScrollRange()-1) * Settings::Manager::getFloat("menu transparency", "GUI");
-        mMenuTransparencySlider->setScrollPosition(menu_transparency);
-        int tooltip_delay = (mToolTipDelaySlider->getScrollRange()-1) * Settings::Manager::getFloat("tooltip delay", "GUI");
-        mToolTipDelaySlider->setScrollPosition(tooltip_delay);
-
-        mSubtitlesButton->setCaptionWithReplacing(Settings::Manager::getBool("subtitles", "GUI") ? "#{sOn}" : "#{sOff}");
-        mCrosshairButton->setCaptionWithReplacing(Settings::Manager::getBool("crosshair", "HUD") ? "#{sOn}" : "#{sOff}");
-
-        float fovVal = (Settings::Manager::getFloat("field of view", "General")-sFovMin)/(sFovMax-sFovMin);
-        mFOVSlider->setScrollPosition(fovVal * (mFOVSlider->getScrollRange()-1));
-        MyGUI::TextBox* fovText;
-        getWidget(fovText, "FovText");
-        fovText->setCaption("Field of View (" + boost::lexical_cast<std::string>(int(Settings::Manager::getFloat("field of view", "General"))) + ")");
-
-        float anisotropyVal = Settings::Manager::getInt("anisotropy", "General") / 16.0;
-        mAnisotropySlider->setScrollPosition(anisotropyVal * (mAnisotropySlider->getScrollRange()-1));
         std::string tf = Settings::Manager::getString("texture filtering", "General");
         mTextureFilteringButton->setCaption(textureFilteringToStr(tf));
         mAnisotropyLabel->setCaption("Anisotropy (" + boost::lexical_cast<std::string>(Settings::Manager::getInt("anisotropy", "General")) + ")");
 
-        float val = (Settings::Manager::getFloat("max viewing distance", "Viewing distance")-sViewDistMin)/(sViewDistMax-sViewDistMin);
-        int viewdist = (mViewDistanceSlider->getScrollRange()-1) * val;
-        mViewDistanceSlider->setScrollPosition(viewdist);
-
-        mMasterVolumeSlider->setScrollPosition(Settings::Manager::getFloat("master volume", "Sound") * (mMasterVolumeSlider->getScrollRange()-1));
-        mMusicVolumeSlider->setScrollPosition(Settings::Manager::getFloat("music volume", "Sound") * (mMusicVolumeSlider->getScrollRange()-1));
-        mEffectsVolumeSlider->setScrollPosition(Settings::Manager::getFloat("sfx volume", "Sound") * (mEffectsVolumeSlider->getScrollRange()-1));
-        mFootstepsVolumeSlider->setScrollPosition(Settings::Manager::getFloat("footsteps volume", "Sound") * (mFootstepsVolumeSlider->getScrollRange()-1));
-        mVoiceVolumeSlider->setScrollPosition(Settings::Manager::getFloat("voice volume", "Sound") * (mVoiceVolumeSlider->getScrollRange()-1));
-
-        mWaterShaderButton->setCaptionWithReplacing(Settings::Manager::getBool("shader", "Water") ? "#{sOn}" : "#{sOff}");
-        mReflectObjectsButton->setCaptionWithReplacing(Settings::Manager::getBool("reflect statics", "Water") ? "#{sOn}" : "#{sOff}");
-        mReflectActorsButton->setCaptionWithReplacing(Settings::Manager::getBool("reflect actors", "Water") ? "#{sOn}" : "#{sOff}");
-        mReflectTerrainButton->setCaptionWithReplacing(Settings::Manager::getBool("reflect terrain", "Water") ? "#{sOn}" : "#{sOff}");
-        mUnderwaterButton->setCaptionWithReplacing(Settings::Manager::getBool("underwater effect", "Water") ? "#{sOn}" : "#{sOff}");
-
         mShadowsTextureSize->setCaption (Settings::Manager::getString ("texture size", "Shadows"));
-        mShadowsLargeDistance->setCaptionWithReplacing(Settings::Manager::getBool("split", "Shadows") ? "#{sOn}" : "#{sOff}");
-        mShadowsEnabledButton->setCaptionWithReplacing(Settings::Manager::getBool("enabled", "Shadows") ? "#{sOn}" : "#{sOff}");
-        mActorShadows->setCaptionWithReplacing(Settings::Manager::getBool("actor shadows", "Shadows") ? "#{sOn}" : "#{sOff}");
-        mStaticsShadows->setCaptionWithReplacing(Settings::Manager::getBool("statics shadows", "Shadows") ? "#{sOn}" : "#{sOff}");
-        mMiscShadows->setCaptionWithReplacing(Settings::Manager::getBool("misc shadows", "Shadows") ? "#{sOn}" : "#{sOff}");
-        mShadowsDebug->setCaptionWithReplacing(Settings::Manager::getBool("debug", "Shadows") ? "#{sOn}" : "#{sOff}");
 
-        float cameraSens = (Settings::Manager::getFloat("camera sensitivity", "Input")-0.2)/(5.0-0.2);
-        mCameraSensitivitySlider->setScrollPosition (cameraSens * (mCameraSensitivitySlider->getScrollRange()-1));
-        float uiSens = (Settings::Manager::getFloat("ui sensitivity", "Input")-0.2)/(5.0-0.2);
-        mUISensitivitySlider->setScrollPosition (uiSens * (mUISensitivitySlider->getScrollRange()-1));
-        mCameraSensitivitySlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
-        mUISensitivitySlider->eventScrollChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onSliderChangePosition);
+        mShaderModeButton->setCaption (Settings::Manager::getString("shader mode", "General"));
 
-
-        mInvertYButton->setCaptionWithReplacing(Settings::Manager::getBool("invert y axis", "Input") ? "#{sOn}" : "#{sOff}");
-
-        std::string shaders;
         if (!Settings::Manager::getBool("shaders", "Objects"))
-            shaders = "off";
-        else
         {
-            shaders = Settings::Manager::getString("shader mode", "General");
-        }
-        mShadersButton->setCaption (shaders);
-
-        if (!MWRender::RenderingManager::waterShaderSupported())
-        {
-            mWaterShaderButton->setEnabled(false);
-            mReflectObjectsButton->setEnabled(false);
-            mReflectActorsButton->setEnabled(false);
-            mReflectTerrainButton->setEnabled(false);
-        }
-
-        if (shaders == "off")
-        {
-            mUnderwaterButton->setEnabled (false);
+            mRefractionButton->setEnabled(false);
             mShadowsEnabledButton->setEnabled(false);
         }
 
-        mFullscreenButton->setCaptionWithReplacing(Settings::Manager::getBool("fullscreen", "Video") ? "#{sOn}" : "#{sOff}");
-        mVSyncButton->setCaptionWithReplacing(Settings::Manager::getBool("vsync", "Video") ? "#{sOn}": "#{sOff}");
         mFPSButton->setCaptionWithReplacing(fpsLevelToStr(Settings::Manager::getInt("fps", "HUD")));
+
+        MyGUI::TextBox* fovText;
+        getWidget(fovText, "FovText");
+        fovText->setCaption("Field of View (" + boost::lexical_cast<std::string>(int(Settings::Manager::getInt("field of view", "General"))) + ")");
     }
 
     void SettingsWindow::onOkButtonClicked(MyGUI::Widget* _sender)
     {
-        mWindowManager.removeGuiMode(GM_Settings);
+        MWBase::Environment::get().getWindowManager()->removeGuiMode(GM_Settings);
     }
 
     void SettingsWindow::onResolutionSelected(MyGUI::ListBox* _sender, size_t index)
@@ -278,7 +250,7 @@ namespace MWGui
         if (index == MyGUI::ITEM_NONE)
             return;
 
-        ConfirmationDialog* dialog = mWindowManager.getConfirmationDialog();
+        ConfirmationDialog* dialog = MWBase::Environment::get().getWindowManager()->getConfirmationDialog();
         dialog->open("#{sNotifyMessage67}");
         dialog->eventOkClicked.clear();
         dialog->eventOkClicked += MyGUI::newDelegate(this, &SettingsWindow::onResolutionAccept);
@@ -296,7 +268,6 @@ namespace MWGui
         Settings::Manager::setInt("resolution y", "Video", resY);
 
         apply();
-        mResolutionList->setIndexSelected(MyGUI::ITEM_NONE);
     }
 
     void SettingsWindow::onResolutionCancel()
@@ -304,29 +275,16 @@ namespace MWGui
         mResolutionList->setIndexSelected(MyGUI::ITEM_NONE);
     }
 
-    void SettingsWindow::onShadowTextureSize(MyGUI::Widget* _sender)
+    void SettingsWindow::onShadowTextureSizeChanged(MyGUI::ComboBox *_sender, size_t pos)
     {
-        std::string size = mShadowsTextureSize->getCaption();
-
-        if (size == "512")
-            size = "1024";
-        else if (size == "1024")
-            size = "2048";
-        else if (size == "2048")
-            size = "4096";
-        else
-            size = "512";
-
-        mShadowsTextureSize->setCaption(size);
-
-        Settings::Manager::setString("texture size", "Shadows", size);
+        Settings::Manager::setString("texture size", "Shadows", _sender->getItemNameAt(pos));
         apply();
     }
 
     void SettingsWindow::onButtonToggled(MyGUI::Widget* _sender)
     {
-        std::string on = mWindowManager.getGameSettingString("sOn", "On");
-        std::string off = mWindowManager.getGameSettingString("sOff", "On");
+        std::string on = MWBase::Environment::get().getWindowManager()->getGameSettingString("sOn", "On");
+        std::string off = MWBase::Environment::get().getWindowManager()->getGameSettingString("sOff", "On");
         bool newState;
         if (_sender->castType<MyGUI::Button>()->getCaption() == on)
         {
@@ -337,6 +295,39 @@ namespace MWGui
         {
             _sender->castType<MyGUI::Button>()->setCaption(on);
             newState = true;
+        }
+
+        if (_sender == mVSyncButton)
+        {
+            // Ogre::Window::setVSyncEnabled is bugged in 1.8
+#if OGRE_VERSION < (1 << 16 | 9 << 8 | 0)
+            MWBase::Environment::get().getWindowManager()->
+                messageBox("VSync will be applied after a restart", std::vector<std::string>());
+#endif
+        }
+
+        if (_sender == mShadersButton)
+        {
+            if (newState == false)
+            {
+                // refraction needs shaders to display underwater fog
+                mRefractionButton->setCaptionWithReplacing("#{sOff}");
+                mRefractionButton->setEnabled(false);
+
+                Settings::Manager::setBool("refraction", "Water", false);
+
+                // shadows not supported
+                mShadowsEnabledButton->setEnabled(false);
+                mShadowsEnabledButton->setCaptionWithReplacing("#{sOff}");
+                Settings::Manager::setBool("enabled", "Shadows", false);
+            }
+            else
+            {
+                // re-enable
+                mRefractionButton->setEnabled(true);
+
+                mShadowsEnabledButton->setEnabled(true);
+            }
         }
 
         if (_sender == mFullscreenButton)
@@ -358,112 +349,33 @@ namespace MWGui
             {
                 std::string msg = "This resolution is not supported in Fullscreen mode. Please select a resolution from the list.";
                 MWBase::Environment::get().getWindowManager()->
-                    messageBox(msg, std::vector<std::string>());
+                    messageBox(msg);
                 _sender->castType<MyGUI::Button>()->setCaption(off);
-            }
-            else
-            {
-                Settings::Manager::setBool("fullscreen", "Video", newState);
-                apply();
+                return;
             }
         }
-        else if (_sender == mVSyncButton)
-        {
-            Settings::Manager::setBool("vsync", "Video", newState);
-            MWBase::Environment::get().getWindowManager()->
-                messageBox("VSync will be applied after a restart", std::vector<std::string>());
-        }
-        else
-        {
-            if (_sender == mWaterShaderButton)
-                Settings::Manager::setBool("shader", "Water", newState);
-            else if (_sender == mUnderwaterButton)
-            {
-                Settings::Manager::setBool("underwater effect", "Water", newState);
-            }
-            else if (_sender == mReflectObjectsButton)
-            {
-                Settings::Manager::setBool("reflect misc", "Water", newState);
-                Settings::Manager::setBool("reflect statics", "Water", newState);
-                Settings::Manager::setBool("reflect statics small", "Water", newState);
-            }
-            else if (_sender == mReflectActorsButton)
-                Settings::Manager::setBool("reflect actors", "Water", newState);
-            else if (_sender == mReflectTerrainButton)
-                Settings::Manager::setBool("reflect terrain", "Water", newState);
-            else if (_sender == mShadowsEnabledButton)
-                Settings::Manager::setBool("enabled", "Shadows", newState);
-            else if (_sender == mShadowsLargeDistance)
-                Settings::Manager::setBool("split", "Shadows", newState);
-            else if (_sender == mActorShadows)
-                Settings::Manager::setBool("actor shadows", "Shadows", newState);
-            else if (_sender == mStaticsShadows)
-                Settings::Manager::setBool("statics shadows", "Shadows", newState);
-            else if (_sender == mMiscShadows)
-                Settings::Manager::setBool("misc shadows", "Shadows", newState);
-            else if (_sender == mShadowsDebug)
-                Settings::Manager::setBool("debug", "Shadows", newState);
-            else if (_sender == mInvertYButton)
-                Settings::Manager::setBool("invert y axis", "Input", newState);
-            else if (_sender == mCrosshairButton)
-                Settings::Manager::setBool("crosshair", "HUD", newState);
-            else if (_sender == mSubtitlesButton)
-                Settings::Manager::setBool("subtitles", "GUI", newState);
 
+        if (getSettingType(_sender) == checkButtonType)
+        {
+            Settings::Manager::setBool(getSettingName(_sender), getSettingCategory(_sender), newState);
             apply();
+            return;
         }
     }
 
-    void SettingsWindow::onShadersToggled(MyGUI::Widget* _sender)
+    void SettingsWindow::onShaderModeToggled(MyGUI::Widget* _sender)
     {
         std::string val = static_cast<MyGUI::Button*>(_sender)->getCaption();
-        if (val == "off")
+        if (val == "cg")
         {
             val = hlslGlsl();
         }
-        else if (val == hlslGlsl())
+        else if (cgAvailable ())
             val = "cg";
-        else
-            val = "off";
 
         static_cast<MyGUI::Button*>(_sender)->setCaption(val);
 
-        if (val == "off")
-        {
-            Settings::Manager::setBool("shaders", "Objects", false);
-
-            // water shader not supported with object shaders off
-            mWaterShaderButton->setCaptionWithReplacing("#{sOff}");
-            mUnderwaterButton->setCaptionWithReplacing("#{sOff}");
-            mWaterShaderButton->setEnabled(false);
-            mReflectObjectsButton->setEnabled(false);
-            mReflectActorsButton->setEnabled(false);
-            mReflectTerrainButton->setEnabled(false);
-            mUnderwaterButton->setEnabled(false);
-            Settings::Manager::setBool("shader", "Water", false);
-            Settings::Manager::setBool("underwater effect", "Water", false);
-
-            // shadows not supported
-            mShadowsEnabledButton->setEnabled(false);
-            mShadowsEnabledButton->setCaptionWithReplacing("#{sOff}");
-            Settings::Manager::setBool("enabled", "Shadows", false);
-        }
-        else
-        {
-            Settings::Manager::setBool("shaders", "Objects", true);
-            Settings::Manager::setString("shader mode", "General", val);
-
-            // re-enable
-            if (MWRender::RenderingManager::waterShaderSupported())
-            {
-                mWaterShaderButton->setEnabled(true);
-                mReflectObjectsButton->setEnabled(true);
-                mReflectActorsButton->setEnabled(true);
-                mReflectTerrainButton->setEnabled(true);
-            }
-            mUnderwaterButton->setEnabled(true);
-            mShadowsEnabledButton->setEnabled(true);
-        }
+        Settings::Manager::setString("shader mode", "General", val);
 
         apply();
     }
@@ -476,62 +388,42 @@ namespace MWGui
         apply();
     }
 
-    void SettingsWindow::onTextureFilteringToggled(MyGUI::Widget* _sender)
+    void SettingsWindow::onTextureFilteringChanged(MyGUI::ComboBox* _sender, size_t pos)
     {
-        std::string current = Settings::Manager::getString("texture filtering", "General");
-        std::string next;
-        if (current == "none")
-            next = "bilinear";
-        else if (current == "bilinear")
-            next = "trilinear";
-        else if (current == "trilinear")
-            next = "anisotropic";
-        else
-            next = "none";
-
-        mTextureFilteringButton->setCaption(textureFilteringToStr(next));
-
-        Settings::Manager::setString("texture filtering", "General", next);
+        Settings::Manager::setString("texture filtering", "General", Misc::StringUtils::lowerCase(_sender->getItemNameAt(pos)));
         apply();
     }
 
     void SettingsWindow::onSliderChangePosition(MyGUI::ScrollBar* scroller, size_t pos)
     {
-        float val = pos / float(scroller->getScrollRange()-1);
-        if (scroller == mMenuTransparencySlider)
-            Settings::Manager::setFloat("menu transparency", "GUI", val);
-        else if (scroller == mToolTipDelaySlider)
-            Settings::Manager::setFloat("tooltip delay", "GUI", val);
-        else if (scroller == mViewDistanceSlider)
-            Settings::Manager::setFloat("max viewing distance", "Viewing distance", (1-val) * sViewDistMin + val * sViewDistMax);
-        else if (scroller == mFOVSlider)
+        if (getSettingType(scroller) == "Slider")
         {
-            MyGUI::TextBox* fovText;
-            getWidget(fovText, "FovText");
-            fovText->setCaption("Field of View (" + boost::lexical_cast<std::string>(int((1-val) * sFovMin + val * sFovMax)) + ")");
-            Settings::Manager::setFloat("field of view", "General", (1-val) * sFovMin + val * sFovMax);
-        }
-        else if (scroller == mAnisotropySlider)
-        {
-            mAnisotropyLabel->setCaption("Anisotropy (" + boost::lexical_cast<std::string>(int(val*16)) + ")");
-            Settings::Manager::setInt("anisotropy", "General", val * 16);
-        }
-        else if (scroller == mMasterVolumeSlider)
-            Settings::Manager::setFloat("master volume", "Sound", val);
-        else if (scroller == mVoiceVolumeSlider)
-            Settings::Manager::setFloat("voice volume", "Sound", val);
-        else if (scroller == mEffectsVolumeSlider)
-            Settings::Manager::setFloat("sfx volume", "Sound", val);
-        else if (scroller == mFootstepsVolumeSlider)
-            Settings::Manager::setFloat("footsteps volume", "Sound", val);
-        else if (scroller == mMusicVolumeSlider)
-            Settings::Manager::setFloat("music volume", "Sound", val);
-        else if (scroller == mUISensitivitySlider)
-            Settings::Manager::setFloat("ui sensitivity", "Input", (1-val) * 0.2 + val * 5.f);
-        else if (scroller == mCameraSensitivitySlider)
-            Settings::Manager::setFloat("camera sensitivity", "Input", (1-val) * 0.2 + val * 5.f);
+            if (getSettingValueType(scroller) == "Float")
+            {
+                float value = pos / float(scroller->getScrollRange()-1);
 
-        apply();
+                float min,max;
+                getSettingMinMax(scroller, min, max);
+                value = min + (max-min) * value;
+                Settings::Manager::setFloat(getSettingName(scroller), getSettingCategory(scroller), value);
+
+                if (scroller == mFOVSlider)
+                {
+                    MyGUI::TextBox* fovText;
+                    getWidget(fovText, "FovText");
+                    fovText->setCaption("Field of View (" + boost::lexical_cast<std::string>(int(value)) + ")");
+                }
+            }
+            else
+            {
+                Settings::Manager::setInt(getSettingName(scroller), getSettingCategory(scroller), pos);
+                if (scroller == mAnisotropySlider)
+                {
+                    mAnisotropyLabel->setCaption("Anisotropy (" + boost::lexical_cast<std::string>(pos) + ")");
+                }
+            }
+            apply();
+        }
     }
 
     void SettingsWindow::apply()
@@ -547,6 +439,8 @@ namespace MWGui
     {
         while (mControlsBox->getChildCount())
             MyGUI::Gui::getInstance().destroyWidget(mControlsBox->getChildAt(0));
+
+        MWBase::Environment::get().getWindowManager ()->removeStaticMessageBox();
 
         std::vector<int> actions = MWBase::Environment::get().getInputManager()->getActionSorting ();
 
@@ -582,7 +476,7 @@ namespace MWGui
 
         static_cast<MyGUI::Button*>(_sender)->setCaptionWithReplacing("#{sNone}");
 
-        MWBase::Environment::get().getWindowManager ()->messageBox ("#{sControlsMenu3}", std::vector<std::string>());
+        MWBase::Environment::get().getWindowManager ()->staticMessageBox ("#{sControlsMenu3}");
         MWBase::Environment::get().getWindowManager ()->disallowMouse();
 
         MWBase::Environment::get().getInputManager ()->enableDetectingBindingMode (actionId);
@@ -599,7 +493,7 @@ namespace MWGui
 
     void SettingsWindow::onResetDefaultBindings(MyGUI::Widget* _sender)
     {
-        ConfirmationDialog* dialog = mWindowManager.getConfirmationDialog();
+        ConfirmationDialog* dialog = MWBase::Environment::get().getWindowManager()->getConfirmationDialog();
         dialog->open("#{sNotifyMessage66}");
         dialog->eventOkClicked.clear();
         dialog->eventOkClicked += MyGUI::newDelegate(this, &SettingsWindow::onResetDefaultBindingsAccept);

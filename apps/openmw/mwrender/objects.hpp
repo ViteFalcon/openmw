@@ -1,7 +1,8 @@
-#ifndef _GAME_RENDER_OBJECTS_H
-#define _GAME_RENDER_OBJECTS_H
+#ifndef GAME_RENDER_OBJECTS_H
+#define GAME_RENDER_OBJECTS_H
 
 #include <OgreColourValue.h>
+#include <OgreAxisAlignedBox.h>
 
 #include <openengine/ogre/renderer.hpp>
 
@@ -13,75 +14,41 @@ namespace MWWorld
 
 namespace MWRender{
 
-/// information about light needed for rendering
-enum LightType
-{
-    // These are all mutually exclusive
-    LT_Normal=0,
-    LT_Flicker=1,
-    LT_FlickerSlow=2,
-    LT_Pulse=3,
-    LT_PulseSlow=4
-};
-
-struct LightInfo
-{
-    // Constants
-    std::string name; // ogre handle
-    Ogre::ColourValue colour;
-    float radius;
-    bool interior; // Does this light belong to an interior or exterior cell
-    LightType type;
-
-    // Runtime variables
-	float flickerVariation; // 25% flicker variation, reset once every 0.5 seconds
-	float flickerSlowVariation; // 25% flicker variation, reset once every 1.0 seconds
-	float resetTime;
-    long double time;
-
-
-    LightInfo() :
-        flickerVariation(0), resetTime(0.5),
-        flickerSlowVariation(0), time(0), interior(true),
-        type(LT_Normal), radius(1.0)
-    {
-    }
-};
+class ObjectAnimation;
 
 class Objects{
+    typedef std::map<MWWorld::Ptr,ObjectAnimation*> PtrAnimationMap;
+
     OEngine::Render::OgreRenderer &mRenderer;
-    std::map<MWWorld::CellStore *, Ogre::SceneNode *> mCellSceneNodes;
-    std::map<MWWorld::CellStore *, Ogre::StaticGeometry*> mStaticGeometry;
-    std::map<MWWorld::CellStore *, Ogre::StaticGeometry*> mStaticGeometrySmall;
-    std::map<MWWorld::CellStore *, Ogre::AxisAlignedBox> mBounds;
-    std::vector<LightInfo> mLights;
-    Ogre::SceneNode* mMwRoot;
-    bool mIsStatic;
+
+    std::map<MWWorld::CellStore*,Ogre::SceneNode*> mCellSceneNodes;
+    std::map<MWWorld::CellStore*,Ogre::StaticGeometry*> mStaticGeometry;
+    std::map<MWWorld::CellStore*,Ogre::StaticGeometry*> mStaticGeometrySmall;
+    std::map<MWWorld::CellStore*,Ogre::AxisAlignedBox> mBounds;
+    PtrAnimationMap mObjects;
+
+    Ogre::SceneNode* mRootNode;
+
     static int uniqueID;
 
-    static float lightLinearValue;
-    static float lightLinearRadiusMult;
+    void insertBegin(const MWWorld::Ptr& ptr);
 
-    static bool lightQuadratic;
-    static float lightQuadraticValue;
-    static float lightQuadraticRadiusMult;
 
-    static bool lightOutQuadInLin;
-
-    void clearSceneNode (Ogre::SceneNode *node);
-    ///< Remove all movable objects from \a node.
 
 public:
-    Objects(OEngine::Render::OgreRenderer& renderer): mRenderer (renderer), mIsStatic(false) {}
+    Objects(OEngine::Render::OgreRenderer &renderer)
+        : mRenderer(renderer)
+        , mRootNode(NULL)
+    {}
     ~Objects(){}
-    void insertBegin (const MWWorld::Ptr& ptr, bool enabled, bool static_);
-    void insertMesh (const MWWorld::Ptr& ptr, const std::string& mesh);
-    void insertLight (const MWWorld::Ptr& ptr, float r, float g, float b, float radius);
+    void insertModel(const MWWorld::Ptr& ptr, const std::string &model);
+
+    ObjectAnimation* getAnimation(const MWWorld::Ptr &ptr);
 
     void enableLights();
     void disableLights();
 
-    void update (const float dt);
+    void update (float dt, Ogre::Camera* camera);
     ///< per-frame update
 
     Ogre::AxisAlignedBox getDimensions(MWWorld::CellStore*);
@@ -92,12 +59,12 @@ public:
 
     void removeCell(MWWorld::CellStore* store);
     void buildStaticGeometry(MWWorld::CellStore &cell);
-    void setMwRoot(Ogre::SceneNode* root);
+    void setRootNode(Ogre::SceneNode* root);
 
     void rebuildStaticGeometry();
 
     /// Updates containing cell for object rendering data
-    void updateObjectCell(const MWWorld::Ptr &ptr);
+    void updateObjectCell(const MWWorld::Ptr &old, const MWWorld::Ptr &cur);
 };
 }
 #endif

@@ -6,6 +6,11 @@
 
 #include "journalentry.hpp"
 
+namespace ESM
+{
+    struct JournalEntry;
+}
+
 namespace MWDialogue
 {
     /// \brief Collection of seen responses for a topic
@@ -13,13 +18,14 @@ namespace MWDialogue
     {
         public:
 
-            typedef std::vector<std::string> TEntryContainer;
+            typedef std::vector<Entry> TEntryContainer;
             typedef TEntryContainer::const_iterator TEntryIter;
 
         protected:
 
             std::string mTopic;
-            TEntryContainer mEntries; // info-IDs
+            std::string mName;
+            TEntryContainer mEntries;
 
         public:
 
@@ -34,13 +40,21 @@ namespace MWDialogue
             ///
             /// \note Redundant entries are ignored.
 
-            TEntryIter begin();
+            void insertEntry (const ESM::JournalEntry& entry);
+            ///< Add entry without checking for redundant entries or modifying the state of the
+            /// topic otherwise
+
+            std::string getTopic() const;
+
+            virtual std::string getName() const;
+
+            TEntryIter begin() const;
             ///< Iterator pointing to the begin of the journal for this topic.
 
-            TEntryIter end();
+            TEntryIter end() const;
             ///< Iterator pointing past the end of the journal for this topic.
 
-            JournalEntry getEntry (const std::string& infoId);
+            JournalEntry getEntry (const std::string& infoId) const;
     };
 }
 

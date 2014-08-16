@@ -1,16 +1,26 @@
-#ifndef _ESM_ACTI_H
-#define _ESM_ACTI_H
+#ifndef OPENMW_ESM_ACTI_H
+#define OPENMW_ESM_ACTI_H
 
-#include "esm_reader.hpp"
+#include <string>
 
 namespace ESM
 {
 
+class ESMReader;
+class ESMWriter;
+
 struct Activator
 {
-    std::string name, script, model;
+    static unsigned int sRecordId;
+
+    std::string mId, mName, mScript, mModel;
 
     void load(ESMReader &esm);
+    void save(ESMWriter &esm) const;
+
+    void blank();
+    ///< Set record to default state (does not touch the ID).
 };
+
 }
 #endif

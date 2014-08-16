@@ -1,7 +1,10 @@
 
 #include "topic.hpp"
 
-#include <components/esm_store/store.hpp>
+#include "../mwbase/environment.hpp"
+#include "../mwbase/world.hpp"
+
+#include "../mwworld/esmstore.hpp"
 
 namespace MWDialogue
 {
@@ -9,7 +12,8 @@ namespace MWDialogue
     {}
 
     Topic::Topic (const std::string& topic)
-    : mTopic (topic)
+    : mTopic (topic), mName (
+      MWBase::Environment::get().getWorld()->getStore().get<ESM::Dialogue>().find (topic)->mId)
     {}
 
     Topic::~Topic()
@@ -20,24 +24,42 @@ namespace MWDialogue
         if (entry.mTopic!=mTopic)
             throw std::runtime_error ("topic does not match: " + mTopic);
 
-        for (TEntryIter iter = begin(); iter!=end(); ++iter)
-            if (*iter==entry.mInfoId)
+        // bail out if we already have heard this
+        for (Topic::TEntryIter it = mEntries.begin(); it != mEntries.end(); ++it)
+        {
+            if (it->mInfoId == entry.mInfoId)
                 return;
+        }
 
-        mEntries.push_back (entry.mInfoId);
+        mEntries.push_back (entry); // we want slicing here
     }
 
-    Topic::TEntryIter Topic::begin()
+    void Topic::insertEntry (const ESM::JournalEntry& entry)
+    {
+        mEntries.push_back (entry);
+    }
+
+    std::string Topic::getTopic() const
+    {
+        return mTopic;
+    }
+
+    std::string Topic::getName() const
+    {
+        return mName;
+    }
+
+    Topic::TEntryIter Topic::begin() const
     {
         return mEntries.begin();
     }
 
-    Topic::TEntryIter Topic::end()
+    Topic::TEntryIter Topic::end() const
     {
         return mEntries.end();
     }
 
-    JournalEntry Topic::getEntry (const std::string& infoId)
+    JournalEntry Topic::getEntry (const std::string& infoId) const
     {
         return JournalEntry (mTopic, infoId);
     }

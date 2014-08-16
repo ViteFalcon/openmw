@@ -2,9 +2,6 @@
 #define MWGUI_TRADEWINDOW_H
 
 #include "container.hpp"
-#include "window_base.hpp"
-
-#include "../mwworld/ptr.hpp"
 
 namespace MyGUI
 {
@@ -20,21 +17,33 @@ namespace MWGui
 
 namespace MWGui
 {
-    class TradeWindow : public ContainerBase, public WindowBase
+    class ItemView;
+    class SortFilterItemModel;
+    class TradeItemModel;
+
+    class TradeWindow : public WindowBase, public ReferenceInterface
     {
         public:
-            TradeWindow(MWBase::WindowManager& parWindowManager);
+            TradeWindow();
 
-            void startTrade(MWWorld::Ptr actor);
+            void startTrade(const MWWorld::Ptr& actor);
 
-            void sellToNpc(MWWorld::Ptr item, int count); ///< only used for adjusting the gold balance
-            void buyFromNpc(MWWorld::Ptr item, int count); ///< only used for adjusting the gold balance
+            void onFrame(float frameDuration);
 
-            bool npcAcceptsItem(MWWorld::Ptr item);
+            void borrowItem (int index, size_t count);
+            void returnItem (int index, size_t count);
 
-            void addOrRemoveGold(int gold);
+            int getMerchantServices();
 
-        protected:
+
+        private:
+            ItemView* mItemView;
+            SortFilterItemModel* mSortModel;
+            TradeItemModel* mTradeModel;
+
+            static const float sBalanceChangeInitialPause; // in seconds
+            static const float sBalanceChangeInterval; // in seconds
+
             MyGUI::Button* mFilterAll;
             MyGUI::Button* mFilterWeapon;
             MyGUI::Button* mFilterApparel;
@@ -54,25 +63,47 @@ namespace MWGui
             MyGUI::TextBox* mPlayerGold;
             MyGUI::TextBox* mMerchantGold;
 
-            int mCurrentBalance;
+            int mItemToSell;
 
-            void onWindowResize(MyGUI::Window* _sender);
+            int mCurrentBalance;
+            int mCurrentMerchantOffer;
+
+            enum BalanceButtonsState {
+                BBS_None,
+                BBS_Increase,
+                BBS_Decrease
+            } mBalanceButtonsState;
+            /// pause before next balance change will trigger while user holds +/- button pressed
+            float mBalanceChangePause;
+
+            void sellToNpc(const MWWorld::Ptr& item, int count, bool boughtItem); ///< only used for adjusting the gold balance
+            void buyFromNpc(const MWWorld::Ptr& item, int count, bool soldItem); ///< only used for adjusting the gold balance
+
+            void onItemSelected (int index);
+            void sellItem (MyGUI::Widget* sender, int count);
+
             void onFilterChanged(MyGUI::Widget* _sender);
             void onOfferButtonClicked(MyGUI::Widget* _sender);
             void onCancelButtonClicked(MyGUI::Widget* _sender);
+            void onMaxSaleButtonClicked(MyGUI::Widget* _sender);
+            void onIncreaseButtonPressed(MyGUI::Widget* _sender, int _left, int _top, MyGUI::MouseButton _id);
+            void onDecreaseButtonPressed(MyGUI::Widget* _sender, int _left, int _top, MyGUI::MouseButton _id);
+            void onBalanceButtonReleased(MyGUI::Widget* _sender, int _left, int _top, MyGUI::MouseButton _id);
 
-            // don't show items that the NPC has equipped in his trade-window.
-            virtual bool ignoreEquippedItems() { return true; }
-            virtual std::vector<MWWorld::Ptr> getEquippedItems();
+            void onIncreaseButtonTriggered();
+            void onDecreaseButtonTriggered();
 
-            virtual bool isTrading() { return true; }
-            virtual bool isTradeWindow() { return true; }
-
-            virtual std::vector<MWWorld::Ptr> itemsToIgnore();
+            void addOrRemoveGold(int gold, const MWWorld::Ptr& actor);
 
             void updateLabels();
 
             virtual void onReferenceUnavailable();
+
+            int getMerchantGold();
+
+            // Relates to NPC gold reset delay
+            void checkTradeTime();
+            void updateTradeTime(); 
     };
 }
 

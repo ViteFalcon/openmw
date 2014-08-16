@@ -1,16 +1,26 @@
 #ifndef MWGUI_SPELLWINDOW_H
 #define MWGUI_SPELLWINDOW_H
 
-#include "window_pinnable_base.hpp"
+#include "windowpinnablebase.hpp"
+#include "../mwworld/ptr.hpp"
 
 namespace MWGui
 {
-    class SpellWindow : public WindowPinnableBase
+    class SpellIcons;
+
+    bool sortItems(const MWWorld::Ptr& left, const MWWorld::Ptr& right);
+
+    bool sortSpells(const std::string& left, const std::string& right);
+
+    class SpellWindow : public WindowPinnableBase, public NoDrop
     {
     public:
-        SpellWindow(MWBase::WindowManager& parWindowManager);
+        SpellWindow(DragAndDrop* drag);
+        virtual ~SpellWindow();
 
         void updateSpells();
+
+        void onFrame(float dt) { NoDrop::onFrame(dt); }
 
     protected:
         MyGUI::ScrollView* mSpellView;
@@ -33,6 +43,8 @@ namespace MWGui
 
         virtual void onPinToggled();
         virtual void open();
+
+        SpellIcons* mSpellIcons;
     };
 }
 

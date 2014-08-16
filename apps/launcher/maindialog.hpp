@@ -2,48 +2,68 @@
 #define MAINDIALOG_H
 
 #include <QMainWindow>
-
+#ifndef Q_MOC_RUN
 #include <components/files/configurationmanager.hpp>
-#include <components/settings/settings.hpp>
+#endif
+#include "settings/gamesettings.hpp"
+#include "settings/graphicssettings.hpp"
+#include "settings/launchersettings.hpp"
 
-class QListWidget;
+#include "ui_mainwindow.h"
+
 class QListWidgetItem;
-class QStackedWidget;
-class QStringList;
-class QStringListModel;
-class QString;
 
-class PlayPage;
-class GraphicsPage;
-class DataFilesPage;
-
-class MainDialog : public QMainWindow
+namespace Launcher
 {
-    Q_OBJECT
+    class PlayPage;
+    class GraphicsPage;
+    class DataFilesPage;
+    class UnshieldThread;
 
-public:
-    MainDialog();
+#ifndef WIN32
+    bool expansions(Launcher::UnshieldThread& cd);
+#endif
 
-public slots:
-    void changePage(QListWidgetItem *current, QListWidgetItem *previous);
-    void play();
-    void profileChanged(int index);
-    bool setup();
+    class MainDialog : public QMainWindow, private Ui::MainWindow
+    {
+        Q_OBJECT
 
-private:
-    void createIcons();
-    void createPages();
-    void closeEvent(QCloseEvent *event);
+    public:
+        explicit MainDialog(QWidget *parent = 0);
+        bool setup();
+        bool showFirstRunDialog();
 
-    QListWidget *mIconWidget;
-    QStackedWidget *mPagesWidget;
+    public slots:
+        void changePage(QListWidgetItem *current, QListWidgetItem *previous);
+        void play();
 
-    PlayPage *mPlayPage;
-    GraphicsPage *mGraphicsPage;
-    DataFilesPage *mDataFilesPage;
+    private:
+        void createIcons();
+        void createPages();
 
-    Files::ConfigurationManager mCfgMgr;
-    Settings::Manager mSettings;
-};
+        bool setupLauncherSettings();
+        bool setupGameSettings();
+        bool setupGraphicsSettings();
 
+        void loadSettings();
+        void saveSettings();
+        bool writeSettings();
+
+        inline bool startProgram(const QString &name, bool detached = false) { return startProgram(name, QStringList(), detached); }
+        bool startProgram(const QString &name, const QStringList &arguments, bool detached = false);
+
+        void closeEvent(QCloseEvent *event);
+
+        PlayPage *mPlayPage;
+        GraphicsPage *mGraphicsPage;
+        DataFilesPage *mDataFilesPage;
+
+        Files::ConfigurationManager mCfgMgr;
+
+        GameSettings mGameSettings;
+        GraphicsSettings mGraphicsSettings;
+        LauncherSettings mLauncherSettings;
+
+    };
+}
 #endif

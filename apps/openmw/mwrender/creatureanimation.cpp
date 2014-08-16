@@ -1,77 +1,190 @@
 #include "creatureanimation.hpp"
 
 #include <OgreEntity.h>
-#include <OgreSceneManager.h>
-#include <OgreSubEntity.h>
+#include <OgreSkeletonInstance.h>
+#include <OgreBone.h>
 
-#include "renderconst.hpp"
+#include <components/esm/loadcrea.hpp>
 
 #include "../mwbase/world.hpp"
 
-using namespace Ogre;
-using namespace NifOgre;
-namespace MWRender{
+#include "../mwworld/class.hpp"
 
-CreatureAnimation::~CreatureAnimation()
+#include "renderconst.hpp"
+
+namespace MWRender
 {
+
+
+CreatureAnimation::CreatureAnimation(const MWWorld::Ptr &ptr)
+  : Animation(ptr, ptr.getRefData().getBaseNode())
+{
+    MWWorld::LiveCellRef<ESM::Creature> *ref = mPtr.get<ESM::Creature>();
+
+    std::string model = ptr.getClass().getModel(ptr);
+    if(!model.empty())
+    {
+        setObjectRoot(model, false);
+        setRenderProperties(mObjectRoot, RV_Actors, RQG_Main, RQG_Alpha);
+
+        if((ref->mBase->mFlags&ESM::Creature::Bipedal))
+            addAnimSource("meshes\\base_anim.nif");
+        addAnimSource(model);
+    }
 }
 
-CreatureAnimation::CreatureAnimation(const MWWorld::Ptr& ptr): Animation()
+
+CreatureWeaponAnimation::CreatureWeaponAnimation(const MWWorld::Ptr &ptr)
+    : Animation(ptr, ptr.getRefData().getBaseNode())
+    , mShowWeapons(false)
+    , mShowCarriedLeft(false)
 {
-    mInsert = ptr.getRefData().getBaseNode();
-    MWWorld::LiveCellRef<ESM::Creature> *ref = ptr.get<ESM::Creature>();
+    MWWorld::LiveCellRef<ESM::Creature> *ref = mPtr.get<ESM::Creature>();
 
-    assert (ref->base != NULL);
-    if(!ref->base->model.empty())
+    std::string model = ptr.getClass().getModel(ptr);
+    if(!model.empty())
     {
-        std::string mesh = "meshes\\" + ref->base->model;
+        setObjectRoot(model, false);
+        setRenderProperties(mObjectRoot, RV_Actors, RQG_Main, RQG_Alpha);
 
-        mEntityList = NifOgre::NIFLoader::createEntities(mInsert, &mTextKeys, mesh);
-        for(size_t i = 0;i < mEntityList.mEntities.size();i++)
+        if((ref->mBase->mFlags&ESM::Creature::Bipedal))
+            addAnimSource("meshes\\base_anim.nif");
+        addAnimSource(model);
+
+        mPtr.getClass().getInventoryStore(mPtr).setListener(this, mPtr);
+
+        updateParts();
+    }
+
+    mWeaponAnimationTime = Ogre::SharedPtr<WeaponAnimationTime>(new WeaponAnimationTime(this));
+}
+
+void CreatureWeaponAnimation::showWeapons(bool showWeapon)
+{
+    if (showWeapon != mShowWeapons)
+    {
+        mShowWeapons = showWeapon;
+        updateParts();
+    }
+}
+
+void CreatureWeaponAnimation::showCarriedLeft(bool show)
+{
+    if (show != mShowCarriedLeft)
+    {
+        mShowCarriedLeft = show;
+        updateParts();
+    }
+}
+
+void CreatureWeaponAnimation::updateParts()
+{
+    mWeapon.setNull();
+    mShield.setNull();
+
+    if (mShowWeapons)
+        updatePart(mWeapon, MWWorld::InventoryStore::Slot_CarriedRight);
+    if (mShowCarriedLeft)
+        updatePart(mShield, MWWorld::InventoryStore::Slot_CarriedLeft);
+}
+
+void CreatureWeaponAnimation::updatePart(NifOgre::ObjectScenePtr& scene, int slot)
+{
+    MWWorld::InventoryStore& inv = mPtr.getClass().getInventoryStore(mPtr);
+    MWWorld::ContainerStoreIterator it = inv.getSlot(slot);
+
+    if (it == inv.end())
+    {
+        scene.setNull();
+        return;
+    }
+    MWWorld::Ptr item = *it;
+
+    std::string bonename;
+    if (slot == MWWorld::InventoryStore::Slot_CarriedRight)
+        bonename = "Weapon Bone";
+    else
+        bonename = "Shield Bone";
+
+    scene = NifOgre::Loader::createObjects(mSkelBase, bonename, mInsert, item.getClass().getModel(item));
+    Ogre::Vector3 glowColor = getEnchantmentColor(item);
+
+    setRenderProperties(scene, RV_Actors, RQG_Main, RQG_Alpha, 0,
+                        !item.getClass().getEnchantment(item).empty(), &glowColor);
+
+    // Crossbows start out with a bolt attached
+    if (slot == MWWorld::InventoryStore::Slot_CarriedRight &&
+            item.getTypeName() == typeid(ESM::Weapon).name() &&
+            item.get<ESM::Weapon>()->mBase->mData.mType == ESM::Weapon::MarksmanCrossbow)
+    {
+        MWWorld::ContainerStoreIterator ammo = inv.getSlot(MWWorld::InventoryStore::Slot_Ammunition);
+        if (ammo != inv.end() && ammo->get<ESM::Weapon>()->mBase->mData.mType == ESM::Weapon::Bolt)
+            attachArrow();
+        else
+            mAmmunition.setNull();
+    }
+    else
+        mAmmunition.setNull();
+
+    if(scene->mSkelBase)
+    {
+        Ogre::SkeletonInstance *skel = scene->mSkelBase->getSkeleton();
+        if(scene->mSkelBase->isParentTagPoint())
         {
-            Ogre::Entity *ent = mEntityList.mEntities[i];
-            ent->setVisibilityFlags(RV_Actors);
-
-            bool transparent = false;
-            for (unsigned int j=0;j < ent->getNumSubEntities() && !transparent; ++j)
+            Ogre::Node *root = scene->mSkelBase->getParentNode();
+            if(skel->hasBone("BoneOffset"))
             {
-                Ogre::MaterialPtr mat = ent->getSubEntity(j)->getMaterial();
-                Ogre::Material::TechniqueIterator techIt = mat->getTechniqueIterator();
-                while (techIt.hasMoreElements() && !transparent)
-                {
-                    Ogre::Technique* tech = techIt.getNext();
-                    Ogre::Technique::PassIterator passIt = tech->getPassIterator();
-                    while (passIt.hasMoreElements() && !transparent)
-                    {
-                        Ogre::Pass* pass = passIt.getNext();
+                Ogre::Bone *offset = skel->getBone("BoneOffset");
 
-                        if (pass->getDepthWriteEnabled() == false)
-                            transparent = true;
-                    }
-                }
+                root->translate(offset->getPosition());
+
+                // It appears that the BoneOffset rotation is completely bogus, at least for light models.
+                //root->rotate(offset->getOrientation());
+                root->pitch(Ogre::Degree(-90.0f));
+
+                root->scale(offset->getScale());
+                root->setInitialState();
             }
-            ent->setRenderQueueGroup(transparent ? RQG_Alpha : RQG_Main);
         }
+        updateSkeletonInstance(mSkelBase->getSkeleton(), skel);
+    }
 
-        if(mEntityList.mSkelBase)
+    std::vector<Ogre::Controller<Ogre::Real> >::iterator ctrl(scene->mControllers.begin());
+    for(;ctrl != scene->mControllers.end();ctrl++)
+    {
+        if(ctrl->getSource().isNull())
         {
-            Ogre::AnimationStateSet *aset = mEntityList.mSkelBase->getAllAnimationStates();
-            Ogre::AnimationStateIterator as = aset->getAnimationStateIterator();
-            while(as.hasMoreElements())
-            {
-                Ogre::AnimationState *state = as.getNext();
-                state->setEnabled(true);
-                state->setLoop(false);
-            }
+            if (slot == MWWorld::InventoryStore::Slot_CarriedRight)
+                ctrl->setSource(mWeaponAnimationTime);
+            else
+                ctrl->setSource(Ogre::SharedPtr<NullAnimationTime>(new NullAnimationTime()));
         }
     }
 }
 
-void CreatureAnimation::runAnimation(float timepassed)
+void CreatureWeaponAnimation::configureAddedObject(NifOgre::ObjectScenePtr object, MWWorld::Ptr ptr, int slot)
 {
-    // Placeholder
+    Ogre::Vector3 glowColor = getEnchantmentColor(ptr);
 
-    Animation::runAnimation(timepassed);
+    setRenderProperties(object, RV_Actors, RQG_Main, RQG_Alpha, 0,
+                        !ptr.getClass().getEnchantment(ptr).empty(), &glowColor);
+}
+
+void CreatureWeaponAnimation::attachArrow()
+{
+    WeaponAnimation::attachArrow(mPtr);
+}
+
+void CreatureWeaponAnimation::releaseArrow()
+{
+    WeaponAnimation::releaseArrow(mPtr);
+}
+
+Ogre::Vector3 CreatureWeaponAnimation::runAnimation(float duration)
+{
+    Ogre::Vector3 ret = Animation::runAnimation(duration);
+    pitchSkeleton(mPtr.getRefData().getPosition().rot[0], mSkelBase->getSkeleton());
+    return ret;
 }
 
 }

@@ -2,14 +2,16 @@
 
 #include <boost/lexical_cast.hpp>
 
+#include "../mwworld/inventorystore.hpp"
+#include "../mwworld/class.hpp"
+
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
-#include "../mwworld/player.hpp"
-#include "../mwworld/inventorystore.hpp"
-#include "../mwworld/actionequip.hpp"
+
+#include "../mwmechanics/spellcasting.hpp"
 #include "../mwmechanics/spells.hpp"
 #include "../mwmechanics/creaturestats.hpp"
-#include "../mwmechanics/spellsuccess.hpp"
+
 #include "../mwgui/inventorywindow.hpp"
 #include "../mwgui/bookwindow.hpp"
 #include "../mwgui/scrollwindow.hpp"
@@ -17,34 +19,18 @@
 #include "windowmanagerimp.hpp"
 #include "itemselection.hpp"
 
+#include "spellwindow.hpp"
 
-namespace
-{
-    bool sortItems(const MWWorld::Ptr& left, const MWWorld::Ptr& right)
-    {
-        int cmp = MWWorld::Class::get(left).getName(left).compare(
-                    MWWorld::Class::get(right).getName(right));
-        return cmp < 0;
-    }
-
-    bool sortSpells(const std::string& left, const std::string& right)
-    {
-        const ESM::Spell* a = MWBase::Environment::get().getWorld()->getStore().spells.find(left);
-        const ESM::Spell* b = MWBase::Environment::get().getWorld()->getStore().spells.find(right);
-
-        int cmp = a->name.compare(b->name);
-        return cmp < 0;
-    }
-}
 
 namespace MWGui
 {
 
-    QuickKeysMenu::QuickKeysMenu(MWBase::WindowManager& parWindowManager)
-        : WindowBase("openmw_quickkeys_menu.layout", parWindowManager)
+    QuickKeysMenu::QuickKeysMenu()
+        : WindowBase("openmw_quickkeys_menu.layout")
         , mAssignDialog(0)
         , mItemSelectionDialog(0)
         , mMagicSelectionDialog(0)
+        , mSelectedIndex(-1)
     {
         getWidget(mOkButton, "OKButton");
         getWidget(mInstructionLabel, "InstructionLabel");
@@ -106,14 +92,14 @@ namespace MWGui
         {
             // open assign dialog
             if (!mAssignDialog)
-                mAssignDialog = new QuickKeysMenuAssign(mWindowManager, this);
+                mAssignDialog = new QuickKeysMenuAssign(this);
             mAssignDialog->setVisible (true);
         }
     }
 
     void QuickKeysMenu::onOkButtonClicked (MyGUI::Widget *sender)
     {
-        mWindowManager.removeGuiMode(GM_QuickKeysMenu);
+        MWBase::Environment::get().getWindowManager()->removeGuiMode(GM_QuickKeysMenu);
     }
 
 
@@ -121,13 +107,12 @@ namespace MWGui
     {
         if (!mItemSelectionDialog )
         {
-            mItemSelectionDialog = new ItemSelectionDialog("#{sQuickMenu6}", ContainerBase::Filter_All, mWindowManager);
+            mItemSelectionDialog = new ItemSelectionDialog("#{sQuickMenu6}");
             mItemSelectionDialog->eventItemSelected += MyGUI::newDelegate(this, &QuickKeysMenu::onAssignItem);
             mItemSelectionDialog->eventDialogCanceled += MyGUI::newDelegate(this, &QuickKeysMenu::onAssignItemCancel);
         }
         mItemSelectionDialog->setVisible(true);
-        mItemSelectionDialog->openContainer(MWBase::Environment::get().getWorld()->getPlayer().getPlayer());
-        mItemSelectionDialog->drawItems ();
+        mItemSelectionDialog->openContainer(MWBase::Environment::get().getWorld()->getPlayerPtr());
 
         mAssignDialog->setVisible (false);
     }
@@ -136,7 +121,7 @@ namespace MWGui
     {
         if (!mMagicSelectionDialog )
         {
-            mMagicSelectionDialog = new MagicSelectionDialog(mWindowManager, this);
+            mMagicSelectionDialog = new MagicSelectionDialog(this);
         }
         mMagicSelectionDialog->setVisible(true);
 
@@ -234,10 +219,16 @@ namespace MWGui
 
         MyGUI::ImageBox* image = frame->createWidget<MyGUI::ImageBox>("ImageBox", MyGUI::IntCoord(5, 5, 32, 32), MyGUI::Align::Default);
 
+        const MWWorld::ESMStore &esmStore =
+            MWBase::Environment::get().getWorld()->getStore();
+
         // use the icon of the first effect
-        const ESM::Spell* spell = MWBase::Environment::get().getWorld()->getStore().spells.find(spellId);
-        const ESM::MagicEffect* effect = MWBase::Environment::get().getWorld()->getStore().magicEffects.find(spell->effects.list.front().effectID);
-        std::string path = effect->icon;
+        const ESM::Spell* spell = esmStore.get<ESM::Spell>().find(spellId);
+
+        const ESM::MagicEffect* effect =
+            esmStore.get<ESM::MagicEffect>().find(spell->mEffects.mList.front().mEffectID);
+
+        std::string path = effect->mIcon;
         int slashPos = path.find("\\");
         path.insert(slashPos+1, "b_");
         path = std::string("icons\\") + path;
@@ -262,55 +253,59 @@ namespace MWGui
 
         QuickKeyType type = *button->getUserData<QuickKeyType>();
 
-        MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayer().getPlayer();
+        MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
         MWWorld::InventoryStore& store = MWWorld::Class::get(player).getInventoryStore(player);
-        MWMechanics::CreatureStats& stats = MWWorld::Class::get(player).getCreatureStats(player);
-        MWMechanics::Spells& spells = stats.getSpells();
+
+        if (type == Type_Item || type == Type_MagicItem)
+        {
+            MWWorld::Ptr item = *button->getChildAt (0)->getUserData<MWWorld::Ptr>();
+            // make sure the item is available
+            if (item.getRefData ().getCount() < 1)
+            {
+                // Try searching for a compatible replacement
+                std::string id = item.getCellRef().mRefID;
+
+                for (MWWorld::ContainerStoreIterator it = store.begin(); it != store.end(); ++it)
+                {
+                    if (Misc::StringUtils::ciEqual(it->getCellRef().mRefID, id))
+                    {
+                        item = *it;
+                        button->getChildAt(0)->setUserData(item);
+                        break;
+                    }
+                }
+
+                if (item.getRefData().getCount() < 1)
+                {
+                    // No replacement was found
+                    MWBase::Environment::get().getWindowManager ()->messageBox (
+                                "#{sQuickMenu5} " + MWWorld::Class::get(item).getName(item));
+                    return;
+                }
+            }
+        }
 
         if (type == Type_Magic)
         {
             std::string spellId = button->getChildAt(0)->getUserString("Spell");
-            spells.setSelectedSpell(spellId);
+
+            // Make sure the player still has this spell
+            MWMechanics::CreatureStats& stats = player.getClass().getCreatureStats(player);
+            MWMechanics::Spells& spells = stats.getSpells();
+            if (!spells.hasSpell(spellId))
+                return;
             store.setSelectedEnchantItem(store.end());
-            mWindowManager.setSelectedSpell(spellId, int(MWMechanics::getSpellSuccessChance(spellId, player)));
+            MWBase::Environment::get().getWindowManager()->setSelectedSpell(spellId, int(MWMechanics::getSpellSuccessChance(spellId, player)));
         }
         else if (type == Type_Item)
         {
             MWWorld::Ptr item = *button->getChildAt (0)->getUserData<MWWorld::Ptr>();
 
-            // make sure the item is available
-            if (item.getRefData ().getCount() == 0)
-            {
-                MWBase::Environment::get().getWindowManager ()->messageBox (
-                            "#{sQuickMenu5} " + MWWorld::Class::get(item).getName(item), std::vector<std::string>());
-                return;
-            }
-
-            boost::shared_ptr<MWWorld::Action> action = MWWorld::Class::get(item).use(item);
-
-            action->execute (MWBase::Environment::get().getWorld()->getPlayer().getPlayer());
-
-            // this is necessary for books/scrolls: if they are already in the player's inventory,
-            // the "Take" button should not be visible.
-            // NOTE: the take button is "reset" when the window opens, so we can safely do the following
-            // without screwing up future book windows
-            mWindowManager.getBookWindow()->setTakeButtonShow(false);
-            mWindowManager.getScrollWindow()->setTakeButtonShow(false);
-
-            // since we changed equipping status, update the inventory window
-            mWindowManager.getInventoryWindow()->drawItems();
+            MWBase::Environment::get().getWindowManager()->getInventoryWindow()->useItem(item);
         }
         else if (type == Type_MagicItem)
         {
             MWWorld::Ptr item = *button->getChildAt (0)->getUserData<MWWorld::Ptr>();
-
-            // make sure the item is available
-            if (item.getRefData ().getCount() == 0)
-            {
-                MWBase::Environment::get().getWindowManager ()->messageBox (
-                            "#{sQuickMenu5} " + MWWorld::Class::get(item).getName(item), std::vector<std::string>());
-                return;
-            }
 
             // retrieve ContainerStoreIterator to the item
             MWWorld::ContainerStoreIterator it = store.begin();
@@ -326,25 +321,18 @@ namespace MWGui
             // equip, if it can be equipped
             if (!MWWorld::Class::get(item).getEquipmentSlots(item).first.empty())
             {
-                // Note: can't use Class::use here because enchanted scrolls for example would then open the scroll window instead of equipping
-
-                MWWorld::ActionEquip action(item);
-                action.execute (MWBase::Environment::get().getWorld ()->getPlayer ().getPlayer ());
-
-                // since we changed equipping status, update the inventory window
-                mWindowManager.getInventoryWindow()->drawItems();
+                MWBase::Environment::get().getWindowManager()->getInventoryWindow()->useItem(item);
             }
 
             store.setSelectedEnchantItem(it);
-            spells.setSelectedSpell("");
-            mWindowManager.setSelectedEnchantItem(item, 100); /// \todo track charge %
+            MWBase::Environment::get().getWindowManager()->setSelectedEnchantItem(item);
         }
     }
 
     // ---------------------------------------------------------------------------------------------------------
 
-    QuickKeysMenuAssign::QuickKeysMenuAssign (MWBase::WindowManager &parWindowManager, QuickKeysMenu* parent)
-        : WindowModal("openmw_quickkeys_menu_assign.layout", parWindowManager)
+    QuickKeysMenuAssign::QuickKeysMenuAssign (QuickKeysMenu* parent)
+        : WindowModal("openmw_quickkeys_menu_assign.layout")
         , mParent(parent)
     {
         getWidget(mLabel, "Label");
@@ -390,8 +378,8 @@ namespace MWGui
 
     // ---------------------------------------------------------------------------------------------------------
 
-    MagicSelectionDialog::MagicSelectionDialog(MWBase::WindowManager &parWindowManager, QuickKeysMenu* parent)
-        : WindowModal("openmw_magicselection_dialog.layout", parWindowManager)
+    MagicSelectionDialog::MagicSelectionDialog(QuickKeysMenu* parent)
+        : WindowModal("openmw_magicselection_dialog.layout")
         , mParent(parent)
         , mWidth(0)
         , mHeight(0)
@@ -419,7 +407,7 @@ namespace MWGui
 
         const int spellHeight = 18;
 
-        MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayer().getPlayer();
+        MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
         MWWorld::InventoryStore& store = MWWorld::Class::get(player).getInventoryStore(player);
         MWMechanics::CreatureStats& stats = MWWorld::Class::get(player).getCreatureStats(player);
         MWMechanics::Spells& spells = stats.getSpells();
@@ -431,23 +419,26 @@ namespace MWGui
 
         for (MWMechanics::Spells::TIterator it = spells.begin(); it != spells.end(); ++it)
         {
-            spellList.push_back(*it);
+            spellList.push_back (it->first);
         }
+
+        const MWWorld::ESMStore &esmStore =
+            MWBase::Environment::get().getWorld()->getStore();
 
         std::vector<std::string> powers;
         std::vector<std::string>::iterator it = spellList.begin();
         while (it != spellList.end())
         {
-            const ESM::Spell* spell = MWBase::Environment::get().getWorld()->getStore().spells.find(*it);
-            if (spell->data.type == ESM::Spell::ST_Power)
+            const ESM::Spell* spell = esmStore.get<ESM::Spell>().find(*it);
+            if (spell->mData.mType == ESM::Spell::ST_Power)
             {
                 powers.push_back(*it);
                 it = spellList.erase(it);
             }
-            else if (spell->data.type == ESM::Spell::ST_Ability
-                || spell->data.type == ESM::Spell::ST_Blight
-                || spell->data.type == ESM::Spell::ST_Curse
-                || spell->data.type == ESM::Spell::ST_Disease)
+            else if (spell->mData.mType == ESM::Spell::ST_Ability
+                || spell->mData.mType == ESM::Spell::ST_Blight
+                || spell->mData.mType == ESM::Spell::ST_Curse
+                || spell->mData.mType == ESM::Spell::ST_Disease)
             {
                 it = spellList.erase(it);
             }
@@ -465,8 +456,10 @@ namespace MWGui
             if (enchantId != "")
             {
                 // only add items with "Cast once" or "Cast on use"
-                const ESM::Enchantment* enchant = MWBase::Environment::get().getWorld()->getStore().enchants.find(enchantId);
-                int type = enchant->data.type;
+                const ESM::Enchantment* enchant =
+                    esmStore.get<ESM::Enchantment>().find(enchantId);
+
+                int type = enchant->mData.mType;
                 if (type != ESM::Enchantment::CastOnce
                     && type != ESM::Enchantment::WhenUsed)
                     continue;
@@ -487,10 +480,10 @@ namespace MWGui
 
         for (std::vector<std::string>::const_iterator it = powers.begin(); it != powers.end(); ++it)
         {
-            const ESM::Spell* spell = MWBase::Environment::get().getWorld()->getStore().spells.find(*it);
+            const ESM::Spell* spell = esmStore.get<ESM::Spell>().find(*it);
             MyGUI::Button* t = mMagicList->createWidget<MyGUI::Button>("SpellText",
                 MyGUI::IntCoord(4, mHeight, mWidth-8, spellHeight), MyGUI::Align::Left | MyGUI::Align::Top);
-            t->setCaption(spell->name);
+            t->setCaption(spell->mName);
             t->setTextAlign(MyGUI::Align::Left);
             t->setUserString("ToolTipType", "Spell");
             t->setUserString("Spell", *it);
@@ -504,10 +497,10 @@ namespace MWGui
         addGroup("#{sSpells}", "");
         for (std::vector<std::string>::const_iterator it = spellList.begin(); it != spellList.end(); ++it)
         {
-            const ESM::Spell* spell = MWBase::Environment::get().getWorld()->getStore().spells.find(*it);
+            const ESM::Spell* spell = esmStore.get<ESM::Spell>().find(*it);
             MyGUI::Button* t = mMagicList->createWidget<MyGUI::Button>("SpellText",
                 MyGUI::IntCoord(4, mHeight, mWidth-8, spellHeight), MyGUI::Align::Left | MyGUI::Align::Top);
-            t->setCaption(spell->name);
+            t->setCaption(spell->mName);
             t->setTextAlign(MyGUI::Align::Left);
             t->setUserString("ToolTipType", "Spell");
             t->setUserString("Spell", *it);
@@ -595,7 +588,6 @@ namespace MWGui
 
     void MagicSelectionDialog::onEnchantedItemSelected(MyGUI::Widget* _sender)
     {
-        MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayer().getPlayer();
         MWWorld::Ptr item = *_sender->getUserData<MWWorld::Ptr>();
 
         mParent->onAssignMagicItem (item);

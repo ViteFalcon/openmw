@@ -8,9 +8,9 @@
 #include <OgreShadowCameraSetupLiSPSM.h>
 #include <OgreShadowCameraSetupPSSM.h>
 #include <OgreHardwarePixelBuffer.h>
-
-#include <OgreOverlayContainer.h>
-#include <OgreOverlayManager.h>
+#include <OgreCamera.h>
+#include <OgreRenderTexture.h>
+#include <OgreViewport.h>
 
 #include <extern/shiny/Main/Factory.hpp>
 
@@ -31,10 +31,7 @@ void Shadows::recreate()
 {
     bool enabled = Settings::Manager::getBool("enabled", "Shadows");
 
-    // Split shadow maps are currently disabled because the terrain cannot cope with them
-    // (Too many texture units) Solution would be a multi-pass terrain material
     bool split = Settings::Manager::getBool("split", "Shadows");
-    //const bool split = false;
 
     sh::Factory::getInstance ().setGlobalSetting ("shadows", enabled && !split ? "true" : "false");
     sh::Factory::getInstance ().setGlobalSetting ("shadows_pssm", enabled && split ? "true" : "false");
@@ -113,8 +110,8 @@ void Shadows::recreate()
     // Set visibility mask for the shadow render textures
     int visibilityMask = RV_Actors * Settings::Manager::getBool("actor shadows", "Shadows")
                             + (RV_Statics + RV_StaticsSmall) * Settings::Manager::getBool("statics shadows", "Shadows")
-                            + RV_Misc * Settings::Manager::getBool("misc shadows", "Shadows");
-
+                            + RV_Misc * Settings::Manager::getBool("misc shadows", "Shadows")
+            + RV_Terrain * (Settings::Manager::getBool("terrain shadows", "Shadows"));
     for (int i = 0; i < (split ? 3 : 1); ++i)
     {
         TexturePtr shadowTexture = mSceneMgr->getShadowTexture(i);
@@ -125,6 +122,7 @@ void Shadows::recreate()
     // --------------------------------------------------------------------------------------------------------------------
     // --------------------------- Debug overlays to display the content of shadow maps -----------------------------------
     // --------------------------------------------------------------------------------------------------------------------
+    /*
     if (Settings::Manager::getBool("debug", "Shadows"))
     {
         OverlayManager& mgr = OverlayManager::getSingleton();
@@ -181,6 +179,7 @@ void Shadows::recreate()
         if ((overlay = mgr.getByName("DebugOverlay")))
             mgr.destroy(overlay);
     }
+    */
 }
 
 PSSMShadowCameraSetup* Shadows::getPSSMSetup()

@@ -3,19 +3,34 @@
 
 #include <QWidget>
 
+#include "ui_playpage.h"
+
 class QComboBox;
 class QPushButton;
+class QAbstractItemModel;
 
-class PlayPage : public QWidget
+namespace Launcher
 {
-    Q_OBJECT
+    class PlayPage : public QWidget, private Ui::PlayPage
+    {
+        Q_OBJECT
 
-public:
-    PlayPage(QWidget *parent = 0);
+    public:
+        PlayPage(QWidget *parent = 0);
+        void setProfilesModel(QAbstractItemModel *model);
 
-    QComboBox *mProfilesComboBox;
-    QPushButton *mPlayButton;
+    signals:
+        void signalProfileChanged(int index);
+        void playButtonClicked();
 
-};
+    public slots:
+        void setProfilesIndex(int index);
 
+    private slots:
+        void slotPlayClicked();
+
+
+
+    };
+}
 #endif

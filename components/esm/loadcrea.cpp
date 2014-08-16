@@ -1,23 +1,29 @@
 #include "loadcrea.hpp"
 
+#include "esmreader.hpp"
+#include "esmwriter.hpp"
+#include "defs.hpp"
+
 namespace ESM {
 
-void Creature::load(ESMReader &esm, const std::string& id)
+    unsigned int Creature::sRecordId = REC_CREA;
+
+void Creature::load(ESMReader &esm)
 {
-    mId = id;
+    mPersistent = esm.getRecordFlags() & 0x0400;
 
-    model = esm.getHNString("MODL");
-    original = esm.getHNOString("CNAM");
-    name = esm.getHNOString("FNAM");
-    script = esm.getHNOString("SCRI");
+    mModel = esm.getHNString("MODL");
+    mOriginal = esm.getHNOString("CNAM");
+    mName = esm.getHNOString("FNAM");
+    mScript = esm.getHNOString("SCRI");
 
-    esm.getHNT(data, "NPDT", 96);
+    esm.getHNT(mData, "NPDT", 96);
 
-    esm.getHNT(flags, "FLAG");
-    scale = 1.0;
-    esm.getHNOT(scale, "XSCL");
+    esm.getHNT(mFlags, "FLAG");
+    mScale = 1.0;
+    esm.getHNOT(mScale, "XSCL");
 
-    inventory.load(esm);
+    mInventory.load(esm);
     mSpells.load(esm);
 
     if (esm.isNextSub("AIDT"))
@@ -32,4 +38,48 @@ void Creature::load(ESMReader &esm, const std::string& id)
     esm.skipRecord();
 }
 
+void Creature::save(ESMWriter &esm) const
+{
+    esm.writeHNCString("MODL", mModel);
+    esm.writeHNOCString("CNAM", mOriginal);
+    esm.writeHNOCString("FNAM", mName);
+    esm.writeHNOCString("SCRI", mScript);
+    esm.writeHNT("NPDT", mData, 96);
+    esm.writeHNT("FLAG", mFlags);
+    if (mScale != 1.0) {
+        esm.writeHNT("XSCL", mScale);
+    }
+
+    mInventory.save(esm);
+    mSpells.save(esm);
+    if (mHasAI) {
+        esm.writeHNT("AIDT", mAiData, sizeof(mAiData));
+    }
+    mAiPackage.save(esm);
+}
+
+    void Creature::blank()
+    {
+        mData.mType = 0;
+        mData.mLevel = 0;
+        mData.mStrength = mData.mIntelligence = mData.mWillpower = mData.mAgility =
+            mData.mSpeed = mData.mEndurance = mData.mPersonality = mData.mLuck = 0;
+        mData.mHealth = mData.mMana = mData.mFatigue = 0;
+        mData.mSoul = 0;
+        mData.mCombat = mData.mMagic = mData.mStealth = 0;
+        for (int i=0; i<6; ++i) mData.mAttack[i] = 0;
+        mData.mGold = 0;
+        mFlags = 0;
+        mScale = 0;
+        mModel.clear();
+        mName.clear();
+        mScript.clear();
+        mOriginal.clear();
+        mInventory.mList.clear();
+        mSpells.mList.clear();
+        mHasAI = false;
+        mAiData.blank();
+        mAiData.mServices = 0;
+        mAiPackage.mList.clear();
+    }
 }

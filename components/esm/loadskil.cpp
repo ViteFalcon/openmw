@@ -1,7 +1,44 @@
 #include "loadskil.hpp"
 
+#include <sstream>
+
+#include <components/misc/stringops.hpp>
+
+#include "esmreader.hpp"
+#include "esmwriter.hpp"
+#include "defs.hpp"
+
 namespace ESM
 {
+    const std::string Skill::sSkillNames[Length] = {
+        "Block",
+        "Armorer",
+        "Mediumarmor",
+        "Heavyarmor",
+        "Bluntweapon",
+        "Longblade",
+        "Axe",
+        "Spear",
+        "Athletics",
+        "Enchant",
+        "Destruction",
+        "Alteration",
+        "Illusion",
+        "Conjuration",
+        "Mysticism",
+        "Restoration",
+        "Alchemy",
+        "Unarmored",
+        "Security",
+        "Sneak",
+        "Acrobatics",
+        "Lightarmor",
+        "Shortblade",
+        "Marksman",
+        "Mercantile",
+        "Speechcraft",
+        "Handtohand",
+    };
     const std::string Skill::sSkillNameIds[Length] = {
         "sSkillBlock",
         "sSkillArmorer",
@@ -60,7 +97,7 @@ namespace ESM
         "stealth_speechcraft.dds",
         "stealth_handtohand.dds",
     };
-    const boost::array<Skill::SkillEnum, Skill::Length> Skill::skillIds = {{
+    const boost::array<Skill::SkillEnum, Skill::Length> Skill::sSkillIds = {{
         Block,
         Armorer,
         MediumArmor,
@@ -90,10 +127,51 @@ namespace ESM
         HandToHand
     }};
 
+    unsigned int Skill::sRecordId = REC_SKIL;
+
 void Skill::load(ESMReader &esm)
 {
-    esm.getHNT(index, "INDX");
-    esm.getHNT(data, "SKDT", 24);
-    description = esm.getHNOString("DESC");
+    esm.getHNT(mIndex, "INDX");
+    esm.getHNT(mData, "SKDT", 24);
+    mDescription = esm.getHNOString("DESC");
+
+    // create an ID from the index and the name (only used in the editor and likely to change in the
+    // future)
+    mId = indexToId (mIndex);
 }
+
+void Skill::save(ESMWriter &esm) const
+{
+    esm.writeHNT("INDX", mIndex);
+    esm.writeHNT("SKDT", mData, 24);
+    esm.writeHNOString("DESC", mDescription);
+}
+
+    void Skill::blank()
+    {
+        mData.mAttribute = 0;
+        mData.mSpecialization = 0;
+        mData.mUseValue[0] = mData.mUseValue[1] = mData.mUseValue[2] = mData.mUseValue[3] = 1.0;
+        mDescription.clear();
+    }
+
+    std::string Skill::indexToId (int index)
+    {
+        std::ostringstream stream;
+
+        if (index!=-1)
+        {
+            stream << "#";
+
+            if (index<10)
+                stream << "0";
+
+            stream << index;
+
+            if (index>=0 && index<Length)
+                stream << sSkillNameIds[index].substr (6);
+        }
+
+        return stream.str();
+    }
 }

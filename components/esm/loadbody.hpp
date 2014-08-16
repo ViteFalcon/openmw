@@ -1,13 +1,18 @@
-#ifndef _ESM_BODY_H
-#define _ESM_BODY_H
+#ifndef OPENMW_ESM_BODY_H
+#define OPENMW_ESM_BODY_H
 
-#include "esm_reader.hpp"
+#include <string>
 
 namespace ESM
 {
 
+class ESMReader;
+class ESMWriter;
+
 struct BodyPart
 {
+    static unsigned int sRecordId;
+
     enum MeshPart
     {
         MP_Head = 0,
@@ -24,13 +29,15 @@ struct BodyPart
         MP_Knee = 11,
         MP_Upperleg = 12,
         MP_Clavicle = 13,
-        MP_Tail = 14
+        MP_Tail = 14,
+
+        MP_Count = 15
     };
 
     enum Flags
     {
         BPF_Female = 1,
-        BPF_Playable = 2
+        BPF_NotPlayable = 2
     };
 
     enum MeshType
@@ -42,16 +49,17 @@ struct BodyPart
 
     struct BYDTstruct
     {
-        char part;
-        char vampire;
-        char flags;
-        char type;
+        char mPart;
+        char mVampire;
+        char mFlags;
+        char mType;
     };
 
-    BYDTstruct data;
-    std::string model, name;
+    BYDTstruct mData;
+    std::string mId, mModel, mRace;
 
     void load(ESMReader &esm);
+    void save(ESMWriter &esm) const;
 };
 }
 #endif

@@ -1,14 +1,20 @@
-#ifndef _ESM_SPEL_H
-#define _ESM_SPEL_H
+#ifndef OPENMW_ESM_SPEL_H
+#define OPENMW_ESM_SPEL_H
 
-#include "esm_reader.hpp"
-#include "defs.hpp"
+#include <string>
+
+#include "effectlist.hpp"
 
 namespace ESM
 {
 
+class ESMReader;
+class ESMWriter;
+
 struct Spell
 {
+    static unsigned int sRecordId;
+
     enum SpellType
     {
         ST_Spell = 0,   // Normal spell, must be cast and costs mana
@@ -28,16 +34,20 @@ struct Spell
 
     struct SPDTstruct
     {
-        int type; // SpellType
-        int cost; // Mana cost
-        int flags; // Flags
+        int mType; // SpellType
+        int mCost; // Mana cost
+        int mFlags; // Flags
     };
 
-    SPDTstruct data;
-    std::string name;
-    EffectList effects;
+    SPDTstruct mData;
+    std::string mId, mName;
+    EffectList mEffects;
 
     void load(ESMReader &esm);
+    void save(ESMWriter &esm) const;
+
+    void blank();
+    ///< Set record to default state (does not touch the ID/index).
 };
 }
 #endif

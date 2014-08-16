@@ -1,12 +1,16 @@
 #ifndef OPENMW_ESM_AIPACKAGE_H
 #define OPENMW_ESM_AIPACKAGE_H
 
-#include "esm_reader.hpp"
-
 #include <vector>
+#include <string>
+
+#include "esmcommon.hpp"
 
 namespace ESM
 {
+    class ESMReader;
+    class ESMWriter;
+
     #pragma pack(push)
     #pragma pack(1)
 
@@ -14,9 +18,10 @@ namespace ESM
     {
         // These are probabilities
         char mHello, mU1, mFight, mFlee, mAlarm, mU2, mU3, mU4;
-        // The last u's might be the skills that this NPC can train you
-        // in?
         int mServices; // See the Services enum
+
+        void blank();
+        ///< Set record to default state (does not touch the ID).
     }; // 12 bytes
 
     struct AIWander
@@ -25,13 +30,13 @@ namespace ESM
         short   mDuration;
         unsigned char mTimeOfDay;
         unsigned char mIdle[8];
-        unsigned char mUnk;
+        unsigned char mShouldRepeat;
     };
 
     struct AITravel
     {
         float   mX, mY, mZ;
-        long    mUnk;
+        int     mUnk;
     };
 
     struct AITarget
@@ -56,7 +61,7 @@ namespace ESM
         AI_Travel = 0x545f4941,
         AI_Follow = 0x465f4941,
         AI_Escort = 0x455f4941,
-        AI_Activate = 0x415f4941,
+        AI_Activate = 0x415f4941
     };
 
     /// \note Used for storaging packages in a single container
@@ -88,6 +93,7 @@ namespace ESM
         /// it needs to use retSubName() if needed. But, hey, there
         /// is only one field left (XSCL) and only two records uses AI
         void load(ESMReader &esm);
+        void save(ESMWriter &esm) const;
     };
 }
 

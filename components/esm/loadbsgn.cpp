@@ -1,15 +1,37 @@
 #include "loadbsgn.hpp"
 
+#include "esmreader.hpp"
+#include "esmwriter.hpp"
+#include "defs.hpp"
+
 namespace ESM
 {
+    unsigned int BirthSign::sRecordId = REC_BSGN;
 
 void BirthSign::load(ESMReader &esm)
 {
-    name = esm.getHNString("FNAM");
-    texture = esm.getHNOString("TNAM");
-    description = esm.getHNOString("DESC");
+    mName = esm.getHNString("FNAM");
+    mTexture = esm.getHNOString("TNAM");
+    mDescription = esm.getHNOString("DESC");
 
-    powers.load(esm);
+    mPowers.load(esm);
 }
+
+void BirthSign::save(ESMWriter &esm) const
+{
+    esm.writeHNCString("FNAM", mName);
+    esm.writeHNOCString("TNAM", mTexture);
+    esm.writeHNOCString("DESC", mDescription);
+
+    mPowers.save(esm);
+}
+
+    void BirthSign::blank()
+    {
+        mName.clear();
+        mDescription.clear();
+        mTexture.clear();
+        mPowers.mList.clear();
+    }
 
 }

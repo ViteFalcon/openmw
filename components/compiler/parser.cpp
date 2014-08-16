@@ -9,6 +9,8 @@
 #include "exception.hpp"
 #include "scanner.hpp"
 
+#include <components/misc/stringops.hpp>
+
 namespace Compiler
 {
     // Report the error and throw an exception.
@@ -50,22 +52,19 @@ namespace Compiler
 
     // Return context
 
-    Context& Parser::getContext()
+    const Context& Parser::getContext() const
     {
         return mContext;
     }
 
     std::string Parser::toLower (const std::string& name)
     {
-        std::string lowerCase;
-
-        std::transform (name.begin(), name.end(), std::back_inserter (lowerCase),
-            (int(*)(int)) std::tolower);
+        std::string lowerCase = Misc::StringUtils::lowerCase(name);
 
         return lowerCase;
     }
 
-    Parser::Parser (ErrorHandler& errorHandler, Context& context)
+    Parser::Parser (ErrorHandler& errorHandler, const Context& context)
     : mErrorHandler (errorHandler), mContext (context), mOptional (false), mEmpty (true)
     {}
 
@@ -147,6 +146,11 @@ namespace Compiler
             scanner.putbackSpecial (code, loc);
 
         return false;
+    }
+
+    bool Parser::parseComment (const std::string& comment, const TokenLoc& loc, Scanner& scanner)
+    {
+        return true;
     }
 
     // Handle an EOF token.

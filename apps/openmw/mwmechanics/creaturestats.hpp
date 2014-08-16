@@ -10,6 +10,12 @@
 #include "spells.hpp"
 #include "activespells.hpp"
 #include "aisequence.hpp"
+#include "drawstate.hpp"
+
+namespace ESM
+{
+    struct CreatureStats;
+}
 
 namespace MWMechanics
 {
@@ -18,24 +24,68 @@ namespace MWMechanics
     ///
     class CreatureStats
     {
-        Stat<int> mAttributes[8];
+        DrawState_ mDrawState;
+        AttributeValue mAttributes[8];
         DynamicStat<float> mDynamic[3]; // health, magicka, fatigue
-        int mLevel;
         Spells mSpells;
         ActiveSpells mActiveSpells;
         MagicEffects mMagicEffects;
-        int mHello;
-        int mFight;
-        int mFlee;
-        int mAlarm;
+        Stat<int> mAiSettings[4];
         AiSequence mAiSequence;
+        bool mDead;
+        bool mDied;
+        int mFriendlyHits;
+        bool mTalkedTo;
+        bool mAlarmed;
+        bool mAttacked;
+        bool mHostile;
+        bool mAttackingOrSpell;
+        bool mKnockdown;
+        bool mHitRecovery;
+        bool mBlock;
+        unsigned int mMovementFlags;
+        float mAttackStrength; // Note only some creatures attack with weapons
 
-        float mLevelHealthBonus;
+        float mFallHeight;
+
+        std::string mLastHitObject; // The last object to hit this actor
+
+        // Do we need to recalculate stats derived from attributes or other factors?
+        bool mRecalcDynamicStats;
+
+        std::map<std::string, MWWorld::TimeStamp> mUsedPowers;
+
+        MWWorld::TimeStamp mTradeTime; // Relates to NPC gold reset delay
+
+        int mGoldPool; // the pool of merchant gold not in inventory
+
+    protected:
+        bool mIsWerewolf;
+        AttributeValue mWerewolfAttributes[8];
+        int mLevel;
 
     public:
         CreatureStats();
 
-        const Stat<int> & getAttribute(int index) const;
+        DrawState_ getDrawState() const;
+        void setDrawState(DrawState_ state);
+
+        /// When attacking, stores how strong the attack should be (0 = weakest, 1 = strongest)
+        float getAttackStrength() const;
+        void setAttackStrength(float value);
+
+        bool needToRecalcDynamicStats();
+
+        void addToFallHeight(float height);
+
+        /// Reset the fall height
+        /// @return total fall height
+        float land();
+
+        bool canUsePower (const std::string& power) const;
+        void usePower (const std::string& power);
+
+        const AttributeValue & getAttribute(int index) const;
 
         const DynamicStat<float> & getHealth() const;
 
@@ -43,32 +93,17 @@ namespace MWMechanics
 
         const DynamicStat<float> & getFatigue() const;
 
+        const DynamicStat<float> & getDynamic (int index) const;
+
         const Spells & getSpells() const;
 
         const ActiveSpells & getActiveSpells() const;
 
         const MagicEffects & getMagicEffects() const;
 
+        bool getAttackingOrSpell() const;
+
         int getLevel() const;
-
-        int getHello() const;
-
-        int getFight() const;
-
-        int getFlee() const;
-
-        int getAlarm() const;
-
-
-        Stat<int> & getAttribute(int index);
-
-        DynamicStat<float> & getHealth();
-
-        DynamicStat<float> & getMagicka();
-
-        DynamicStat<float> & getFatigue();
-
-        DynamicStat<float> & getDynamic(int index);
 
         Spells & getSpells();
 
@@ -76,8 +111,9 @@ namespace MWMechanics
 
         MagicEffects & getMagicEffects();
 
-
-        void setAttribute(int index, const Stat<int> &value);
+        void setAttribute(int index, const AttributeValue &value);
+        // Shortcut to set only the base
+        void setAttribute(int index, int base);
 
         void setHealth(const DynamicStat<float> &value);
 
@@ -85,32 +121,118 @@ namespace MWMechanics
 
         void setFatigue(const DynamicStat<float> &value);
 
+        void setDynamic (int index, const DynamicStat<float> &value);
+
         void setSpells(const Spells &spells);
 
         void setActiveSpells(const ActiveSpells &active);
 
         void setMagicEffects(const MagicEffects &effects);
 
+        void setAttackingOrSpell(bool attackingOrSpell);
+
         void setLevel(int level);
 
-        void setHello(int value);
+        enum AiSetting
+        {
+            AI_Hello = 0,
+            AI_Fight = 1,
+            AI_Flee = 2,
+            AI_Alarm = 3
+        };
+        void setAiSetting (AiSetting index, Stat<int> value);
+        void setAiSetting (AiSetting index, int base);
+        Stat<int> getAiSetting (AiSetting index) const;
 
-        void setFight(int value);
-
-        void setFlee(int value);
-
-        void setAlarm(int value);
-        
         const AiSequence& getAiSequence() const;
-        
+
         AiSequence& getAiSequence();
-   
+
         float getFatigueTerm() const;
         ///< Return effective fatigue
 
-        // small hack to allow the fact that Health permanently increases by 10% of endurance on each level up
-        void increaseLevelHealthBonus(float value);
-        float getLevelHealthBonus() const;
+        bool isDead() const;
+
+        bool hasDied() const;
+
+        void clearHasDied();
+
+        void resurrect();
+
+        bool hasCommonDisease() const;
+
+        bool hasBlightDisease() const;
+
+        int getFriendlyHits() const;
+        ///< Number of friendly hits received.
+
+        void friendlyHit();
+        ///< Increase number of friendly hits by one.
+
+        bool hasTalkedToPlayer() const;
+        ///< Has this creature talked with the player before?
+
+        void talkedToPlayer();
+
+        bool isAlarmed() const;
+
+        void setAlarmed (bool alarmed);
+
+        bool getAttacked() const;
+
+        void setAttacked (bool attacked);
+
+        bool isHostile() const;
+
+        void setHostile (bool hostile);
+
+        bool getCreatureTargetted() const;
+
+        float getEvasion() const;
+
+        void setKnockedDown(bool value);
+        bool getKnockedDown() const;
+        void setHitRecovery(bool value);
+        bool getHitRecovery() const;
+        void setBlock(bool value);
+        bool getBlock() const;
+
+        enum Flag
+        {
+            Flag_ForceRun = 1,
+            Flag_ForceSneak = 2,
+            Flag_Run = 4,
+            Flag_Sneak = 8
+        };
+        enum Stance
+        {
+            Stance_Run,
+            Stance_Sneak
+        };
+
+        bool getMovementFlag (Flag flag) const;
+        void setMovementFlag (Flag flag, bool state);
+        /// Like getMovementFlag, but also takes into account if the flag is Forced
+        bool getStance (Stance flag) const;
+
+        void setLastHitObject(const std::string &objectid);
+        const std::string &getLastHitObject() const;
+
+        // Note, this is just a cache to avoid checking the whole container store every frame TODO: Put it somewhere else?
+        std::set<int> mBoundItems;
+        // Same as above
+        std::map<int, std::string> mSummonedCreatures;
+
+        void writeState (ESM::CreatureStats& state) const;
+
+        void readState (const ESM::CreatureStats& state);
+
+        // Relates to NPC gold reset delay
+        void setTradeTime(MWWorld::TimeStamp tradeTime);
+        MWWorld::TimeStamp getTradeTime() const;
+
+        void setGoldPool(int pool);
+        int getGoldPool() const;
     };
 }
 

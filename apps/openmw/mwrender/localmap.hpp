@@ -1,9 +1,10 @@
-#ifndef _GAME_RENDER_LOCALMAP_H
-#define _GAME_RENDER_LOCALMAP_H
+#ifndef GAME_RENDER_LOCALMAP_H
+#define GAME_RENDER_LOCALMAP_H
 
 #include <openengine/ogre/renderer.hpp>
 
 #include <OgreAxisAlignedBox.h>
+#include <OgreColourValue.h>
 
 namespace MWWorld
 {
@@ -27,16 +28,18 @@ namespace MWRender
          * Request the local map for an exterior cell.
          * @remarks It will either be loaded from a disk cache,
          * or rendered if it is not already cached.
-         * @param exterior cell
+         * @param cell exterior cell
+         * @param zMin min height of objects or terrain in cell
+         * @param zMax max height of objects or terrain in cell
          */
-        void requestMap (MWWorld::CellStore* cell);
+        void requestMap (MWWorld::CellStore* cell, float zMin, float zMax);
 
         /**
          * Request the local map for an interior cell.
          * @remarks It will either be loaded from a disk cache,
          * or rendered if it is not already cached.
-         * @param interior cell
-         * @param bounding box of the cell
+         * @param cell interior cell
+         * @param bounds bounding box of the cell
          */
         void requestMap (MWWorld::CellStore* cell,
                         Ogre::AxisAlignedBox bounds);
@@ -58,7 +61,6 @@ namespace MWRender
          */
         void saveFogOfWar(MWWorld::CellStore* cell);
 
-
         /**
          * Get the interior map texture index and normalized position
          * on this texture, given a world position (in ogre coordinates)
@@ -75,7 +77,7 @@ namespace MWRender
         MWRender::RenderingManager* mRenderingManager;
 
         // 1024*1024 pixels for a cell
-        static const int sMapResolution = 1024;
+        static const int sMapResolution = 512;
 
         // the dynamic texture is a bottleneck, so don't set this too high
         static const int sFogOfWarResolution = 32;
@@ -90,6 +92,9 @@ namespace MWRender
         Ogre::SceneNode* mCameraNode;
         Ogre::SceneNode* mCameraPosNode;
         Ogre::SceneNode* mCameraRotNode;
+
+        // directional light from a fixed angle
+        Ogre::Light* mLight;
 
         float mAngle;
         const Ogre::Vector2 rotatePoint(const Ogre::Vector2& p, const Ogre::Vector2& c, const float angle);

@@ -1,6 +1,8 @@
 #include "BulletShapeLoader.h"
 
-
+namespace OEngine {
+namespace Physic
+{
 
 BulletShape::BulletShape(Ogre::ResourceManager* creator, const Ogre::String &name,
     Ogre::ResourceHandle handle, const Ogre::String &group, bool isManual,
@@ -15,14 +17,17 @@ Ogre::Resource(creator, name, handle, group, isManual, loader)
     list all the options that need to be set before loading, of which
     we have none as such. Full details can be set through scripts.
     */
-    Shape = NULL;
-    collide = true;
+    mCollisionShape = NULL;
+    mRaycastingShape = NULL;
+    mHasCollisionNode = false;
+    mCollide = true;
     createParamDictionary("BulletShape");
 }
 
 BulletShape::~BulletShape()
 {
-    deleteShape(Shape);
+    deleteShape(mCollisionShape);
+    deleteShape(mRaycastingShape);
 }
 
 // farm out to BulletShapeLoader
@@ -31,27 +36,28 @@ void BulletShape::loadImpl()
     mLoader->loadResource(this);
 }
 
-void BulletShape::deleteShape(btCollisionShape* mShape)
+void BulletShape::deleteShape(btCollisionShape* shape)
 {
-    if(mShape!=NULL)
+    if(shape!=NULL)
     {
-        if(mShape->isCompound())
+        if(shape->isCompound())
         {
-            btCompoundShape* ms = static_cast<btCompoundShape*>(Shape);
+            btCompoundShape* ms = static_cast<btCompoundShape*>(mCollisionShape);
             int a = ms->getNumChildShapes();
             for(int i=0; i <a;i++)
             {
                 deleteShape(ms->getChildShape(i));
             }
         }
-        delete mShape;
+        delete shape;
     }
-    mShape = NULL;
+    shape = NULL;
 }
 
 void BulletShape::unloadImpl()
 {
-    deleteShape(Shape);
+    deleteShape(mCollisionShape);
+    deleteShape(mRaycastingShape);
 }
 
 //TODO:change this?
@@ -63,21 +69,24 @@ size_t BulletShape::calculateSize() const
 
 
 //=============================================================================================================
-template<> BulletShapeManager *Ogre::Singleton<BulletShapeManager>::msSingleton = 0;
+BulletShapeManager *BulletShapeManager::sThis = 0;
 
 BulletShapeManager *BulletShapeManager::getSingletonPtr()
 {
-    return msSingleton;
+    return sThis;
 }
 
 BulletShapeManager &BulletShapeManager::getSingleton()
 {
-    assert(msSingleton);
-    return(*msSingleton);
+    assert(sThis);
+    return(*sThis);
 }
 
 BulletShapeManager::BulletShapeManager()
 {
+    assert(!sThis);
+    sThis = this;
+
     mResourceType = "BulletShape";
 
     // low, because it will likely reference other resources
@@ -91,7 +100,23 @@ BulletShapeManager::~BulletShapeManager()
 {
     // and this is how we unregister it
     Ogre::ResourceGroupManager::getSingleton()._unregisterResourceManager(mResourceType);
+
+    sThis = 0;
 }
+
+#if (OGRE_VERSION >= ((1 << 16) | (9 << 8) | 0))
+BulletShapePtr BulletShapeManager::getByName(const Ogre::String& name, const Ogre::String& groupName)
+{
+    return getResourceByName(name, groupName).staticCast<BulletShape>();
+}
+
+BulletShapePtr BulletShapeManager::create (const Ogre::String& name, const Ogre::String& group,
+                                bool isManual, Ogre::ManualResourceLoader* loader,
+                                const Ogre::NameValuePairList* createParams)
+{
+    return createResource(name,group,isManual,loader,createParams).staticCast<BulletShape>();
+}
+#endif
 
 BulletShapePtr BulletShapeManager::load(const Ogre::String &name, const Ogre::String &group)
 {
@@ -123,3 +148,6 @@ void BulletShapeLoader::loadResource(Ogre::Resource *resource)
 
 void BulletShapeLoader::load(const std::string &name,const std::string &group)
 {}
+
+}
+}

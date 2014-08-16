@@ -21,8 +21,8 @@
 
  */
 
-#ifndef _NIF_NODE_H_
-#define _NIF_NODE_H_
+#ifndef OPENMW_COMPONENTS_NIF_NODE_HPP
+#define OPENMW_COMPONENTS_NIF_NODE_HPP
 
 #include <OgreMatrix4.h>
 
@@ -54,7 +54,7 @@ public:
     Ogre::Matrix3 boundRot;
     Ogre::Vector3 boundXYZ; // Box size
 
-    void read(NIFFile *nif)
+    void read(NIFStream *nif)
     {
         Named::read(nif);
 
@@ -111,8 +111,16 @@ public:
         boneIndex = ind;
     }
 
-    Ogre::Matrix4 getLocalTransform();
-    Ogre::Matrix4 getWorldTransform();
+    void getProperties(const Nif::NiTexturingProperty *&texprop,
+                       const Nif::NiMaterialProperty *&matprop,
+                       const Nif::NiAlphaProperty *&alphaprop,
+                       const Nif::NiVertexColorProperty *&vertprop,
+                       const Nif::NiZBufferProperty *&zprop,
+                       const Nif::NiSpecularProperty *&specprop,
+                       const Nif::NiWireframeProperty *&wireprop) const;
+
+    Ogre::Matrix4 getLocalTransform() const;
+    Ogre::Matrix4 getWorldTransform() const;
 };
 
 struct NiNode : Node
@@ -120,15 +128,23 @@ struct NiNode : Node
     NodeList children;
     NodeList effects;
 
-    /* Known NiNode flags:
-        0x01 hidden
-        0x02 use mesh for collision
-        0x04 use bounding box for collision (?)
-        0x08 unknown, but common
-        0x20, 0x40, 0x80 unknown
-    */
+    enum Flags {
+        Flag_Hidden = 0x0001,
+        Flag_MeshCollision = 0x0002,
+        Flag_BBoxCollision = 0x0004
+    };
+    enum BSAnimFlags {
+        AnimFlag_AutoPlay = 0x0020
+    };
+    enum BSParticleFlags {
+        ParticleFlag_AutoPlay = 0x0020,
+        ParticleFlag_LocalSpace = 0x0080
+    };
+    enum ControllerFlags {
+        ControllerFlag_Active = 0x8
+    };
 
-    void read(NIFFile *nif)
+    void read(NIFStream *nif)
     {
         Node::read(nif);
         children.read(nif);
@@ -162,7 +178,7 @@ struct NiTriShape : Node
     NiTriShapeDataPtr data;
     NiSkinInstancePtr skin;
 
-    void read(NIFFile *nif)
+    void read(NIFStream *nif)
     {
         Node::read(nif);
         data.read(nif);
@@ -190,7 +206,7 @@ struct NiCamera : Node
         // Level of detail modifier
         float LOD;
 
-        void read(NIFFile *nif)
+        void read(NIFStream *nif)
         {
             left = nif->getFloat();
             right = nif->getFloat();
@@ -209,7 +225,7 @@ struct NiCamera : Node
     };
     Camera cam;
 
-    void read(NIFFile *nif)
+    void read(NIFStream *nif)
     {
         Node::read(nif);
 
@@ -224,7 +240,7 @@ struct NiAutoNormalParticles : Node
 {
     NiAutoNormalParticlesDataPtr data;
 
-    void read(NIFFile *nif)
+    void read(NIFStream *nif)
     {
         Node::read(nif);
         data.read(nif);
@@ -242,7 +258,7 @@ struct NiRotatingParticles : Node
 {
     NiRotatingParticlesDataPtr data;
 
-    void read(NIFFile *nif)
+    void read(NIFStream *nif)
     {
         Node::read(nif);
         data.read(nif);

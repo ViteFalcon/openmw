@@ -1,24 +1,28 @@
 #include "loadglob.hpp"
 
+#include "defs.hpp"
+
 namespace ESM
 {
+    unsigned int Global::sRecordId = REC_GLOB;
 
-void Global::load(ESMReader &esm)
-{
-    VarType t;
-    std::string tmp = esm.getHNString("FNAM");
-    if (tmp == "s")
-        t = VT_Short;
-    else if (tmp == "l")
-        t = VT_Int;
-    else if (tmp == "f")
-        t = VT_Float;
-    else
-        esm.fail("Illegal global variable type " + tmp);
-    type = t;
+    void Global::load (ESMReader &esm)
+    {
+        mValue.read (esm, ESM::Variant::Format_Global);
+    }
 
-    // Note: Both floats and longs are represented as floats.
-    esm.getHNT(value, "FLTV");
-}
+    void Global::save (ESMWriter &esm) const
+    {
+        mValue.write (esm, ESM::Variant::Format_Global);
+    }
 
+    void Global::blank()
+    {
+        mValue.setType (ESM::VT_None);
+    }
+
+    bool operator== (const Global& left, const Global& right)
+    {
+        return left.mId==right.mId && left.mValue==right.mValue;
+    }
 }

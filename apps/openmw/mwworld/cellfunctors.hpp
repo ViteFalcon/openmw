@@ -4,7 +4,7 @@
 #include <vector>
 #include <string>
 
-#include "refdata.hpp"
+#include "ptr.hpp"
 
 namespace ESM
 {
@@ -13,16 +13,18 @@ namespace ESM
 
 namespace MWWorld
 {
-    /// List all (Ogre-)handles.
-    struct ListHandles
+    /// List all (Ogre-)handles, then reset RefData::mBaseNode to 0.
+    struct ListAndResetHandles
     {
         std::vector<Ogre::SceneNode*> mHandles;
 
-        bool operator() (ESM::CellRef& ref, RefData& data)
+        bool operator() (MWWorld::Ptr ptr)
         {
-            Ogre::SceneNode* handle = data.getBaseNode();
+            Ogre::SceneNode* handle = ptr.getRefData().getBaseNode();
             if (handle)
                 mHandles.push_back (handle);
+
+            ptr.getRefData().setBaseNode(0);
             return true;
         }
     };

@@ -1,17 +1,24 @@
 #ifndef GAME_MWWORLD_PLAYER_H
 #define GAME_MWWORLD_PLAYER_H
 
-#include "OgreCamera.h"
-
-#include "../mwworld/cellstore.hpp"
 #include "../mwworld/refdata.hpp"
-#include "../mwworld/ptr.hpp"
+#include "../mwworld/livecellref.hpp"
 
 #include "../mwmechanics/drawstate.hpp"
+
+#include <OgreVector3.h>
+
+namespace ESM
+{
+    struct NPC;
+    class ESMWriter;
+    class ESMReader;
+}
 
 namespace MWBase
 {
     class World;
+    class Ptr;
 }
 
 namespace MWWorld
@@ -21,85 +28,47 @@ namespace MWWorld
     /// \brief NPC object representing the player and additional player data
     class Player
     {
-        LiveCellRef<ESM::NPC> mPlayer;
-        MWWorld::CellStore *mCellStore;
-        std::string mName;
-        bool mMale;
-        std::string mRace;
-        std::string mBirthsign;
-        ESM::Class *mClass;
-        bool mAutoMove;
-        int mForwardBackward;
+        LiveCellRef<ESM::NPC>   mPlayer;
+        MWWorld::CellStore      *mCellStore;
+        std::string             mSign;
+
+        Ogre::Vector3 mLastKnownExteriorPosition;
+
+        ESM::Position           mMarkedPosition;
+        // If no position was marked, this is NULL
+        CellStore*              mMarkedCell;
+
+        bool                    mAutoMove;
+        int                     mForwardBackward;
+        bool                    mTeleported;
     public:
 
         Player(const ESM::NPC *player, const MWBase::World& world);
 
-        ~Player();
+        // For mark/recall magic effects
+        void markPosition (CellStore* markedCell, ESM::Position markedPosition);
+        void getMarkedPosition (CellStore*& markedCell, ESM::Position& markedPosition) const;
 
-        void setCell (MWWorld::CellStore *cellStore)
-        {
-            mCellStore = cellStore;
-        }
+        /// Interiors can not always be mapped to a world position. However
+        /// world position is still required for divine / almsivi magic effects
+        /// and the player arrow on the global map.
+        /// TODO: This should be stored in the savegame, too.
+        void setLastKnownExteriorPosition (const Ogre::Vector3& position) { mLastKnownExteriorPosition = position; }
+        Ogre::Vector3 getLastKnownExteriorPosition() const { return mLastKnownExteriorPosition; }
 
-        MWWorld::Ptr getPlayer()
-        {
-            MWWorld::Ptr ptr (&mPlayer, mCellStore);
-            return ptr;
-        }
+        void set (const ESM::NPC *player);
 
-        void setName (const std::string& name)
-        {
-            mName = name;
-        }
+        void setCell (MWWorld::CellStore *cellStore);
 
-        void setGender (bool male)
-        {
-            mMale = male;
-        }
+        MWWorld::Ptr getPlayer();
 
-        void setRace (const std::string& race)
-        {
-            mRace = race;
-        }
+        void setBirthSign(const std::string &sign);
 
-        void setBirthsign (const std::string& birthsign)
-        {
-            mBirthsign = birthsign;
-        }
-
-        void setClass (const ESM::Class& class_);
+        const std::string &getBirthSign() const;
 
         void setDrawState (MWMechanics::DrawState_ state);
 
-        std::string getName() const
-        {
-            return mName;
-        }
-
-        bool isMale() const
-        {
-            return mMale;
-        }
-
-        std::string getRace() const
-        {
-            return mRace;
-        }
-
-        std::string getBirthsign() const
-        {
-            return mBirthsign;
-        }
-
-        const ESM::Class& getClass() const
-        {
-            return *mClass;
-        }
-
-        bool getAutoMove() const
-        {
-            return mAutoMove;
-        }
+        bool getAutoMove() const;
 
         MWMechanics::DrawState_ getDrawState(); /// \todo constness
 
@@ -110,7 +79,21 @@ namespace MWWorld
         void setForwardBackward (int value);
         void setUpDown(int value);
 
-        void toggleRunning();
+        void setRunState(bool run);
+        void setSneak(bool sneak);
+
+        void yaw(float yaw);
+        void pitch(float pitch);
+        void roll(float roll);
+
+        bool wasTeleported() const;
+        void setTeleported(bool teleported);
+
+        void clear();
+
+        void write (ESM::ESMWriter& writer) const;
+
+        bool readRecord (ESM::ESMReader& reader, int32_t type);
     };
 }
 #endif

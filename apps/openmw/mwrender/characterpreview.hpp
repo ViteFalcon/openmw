@@ -3,9 +3,9 @@
 
 #include <OgreRenderTarget.h>
 #include <OgreMaterialManager.h>
+#include <OgreVector3.h>
 
-
-#include "externalrendering.hpp"
+#include <components/esm/loadnpc.hpp>
 
 #include "../mwworld/ptr.hpp"
 
@@ -22,18 +22,21 @@ namespace MWRender
 
     class NpcAnimation;
 
-    class CharacterPreview : public ExternalRendering
+    class CharacterPreview
     {
     public:
         CharacterPreview(MWWorld::Ptr character, int sizeX, int sizeY, const std::string& name,
                          Ogre::Vector3 position, Ogre::Vector3 lookAt);
         virtual ~CharacterPreview();
 
-        virtual void setup (Ogre::SceneManager *sceneManager);
+        virtual void setup ();
         virtual void onSetup();
 
+        virtual void rebuild();
 
     protected:
+        virtual bool renderHeadOnly() { return false; }
+
         Ogre::TexturePtr mTexture;
         Ogre::RenderTarget* mRenderTarget;
         Ogre::Viewport* mViewport;
@@ -49,6 +52,7 @@ namespace MWRender
         MWWorld::Ptr mCharacter;
 
         MWRender::NpcAnimation* mAnimation;
+        std::string mCurrentAnimGroup;
 
         std::string mName;
 
@@ -68,8 +72,6 @@ namespace MWRender
 
         int getSlotSelected(int posX, int posY);
 
-        void setNpcAnimation (NpcAnimation* anim);
-
     private:
 
         OEngine::Render::SelectionBuffer* mSelectionBuffer;
@@ -77,10 +79,28 @@ namespace MWRender
 
     class RaceSelectionPreview : public CharacterPreview
     {
+        ESM::NPC                        mBase;
+        MWWorld::LiveCellRef<ESM::NPC>  mRef;
+
+    protected:
+
+        virtual bool renderHeadOnly() { return true; }
+
+        void updateCamera();
+
     public:
         RaceSelectionPreview();
 
+        virtual void onSetup();
+        void render();
+
         void update(float angle);
+
+        const ESM::NPC &getPrototype() const {
+            return mBase;
+        }
+
+        void setPrototype(const ESM::NPC &proto);
     };
 
 }

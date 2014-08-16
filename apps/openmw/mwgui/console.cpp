@@ -1,17 +1,14 @@
-
 #include "console.hpp"
 
-#include <algorithm>
-#include <fstream>
-
-#include <components/esm_store/reclists.hpp>
-#include <components/esm_store/store.hpp>
-
 #include <components/compiler/exception.hpp>
+#include <components/compiler/extensions0.hpp>
 
 #include "../mwscript/extensions.hpp"
 
 #include "../mwbase/environment.hpp"
+#include "../mwbase/windowmanager.hpp"
+
+#include "../mwworld/esmstore.hpp"
 
 namespace MWGui
 {
@@ -93,12 +90,12 @@ namespace MWGui
             scanner.listKeywords (mNames);
 
             // identifier
-            const ESMS::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
+            const MWWorld::ESMStore& store =
+                MWBase::Environment::get().getWorld()->getStore();
 
-            for (ESMS::RecListList::const_iterator iter (store.recLists.begin());
-                iter!=store.recLists.end(); ++iter)
+            for (MWWorld::ESMStore::iterator it = store.begin(); it != store.end(); ++it)
             {
-                iter->second->listIdentifier (mNames);
+                it->second->listIdentifier (mNames);
             }
 
             // sort
@@ -107,63 +104,56 @@ namespace MWGui
     }
 
     Console::Console(int w, int h, bool consoleOnlyScripts)
-      : Layout("openmw_console.layout"),
+      : WindowBase("openmw_console.layout"),
         mCompilerContext (MWScript::CompilerContext::Type_Console),
         mConsoleOnlyScripts (consoleOnlyScripts)
     {
         setCoord(10,10, w-10, h/2);
 
-        getWidget(command, "edit_Command");
-        getWidget(history, "list_History");
+        getWidget(mCommandLine, "edit_Command");
+        getWidget(mHistory, "list_History");
 
         // Set up the command line box
-        command->eventEditSelectAccept +=
+        mCommandLine->eventEditSelectAccept +=
             newDelegate(this, &Console::acceptCommand);
-        command->eventKeyButtonPressed +=
+        mCommandLine->eventKeyButtonPressed +=
             newDelegate(this, &Console::keyPress);
 
         // Set up the log window
-        history->setOverflowToTheLeft(true);
-        history->setEditStatic(true);
-        history->setVisibleVScroll(true);
+        mHistory->setOverflowToTheLeft(true);
 
         // compiler
-        MWScript::registerExtensions (mExtensions, mConsoleOnlyScripts);
+        Compiler::registerExtensions (mExtensions, mConsoleOnlyScripts);
         mCompilerContext.setExtensions (&mExtensions);
     }
 
-    void Console::enable()
+    void Console::open()
     {
-        setVisible(true);
-
         // Give keyboard focus to the combo box whenever the console is
         // turned on
-        MyGUI::InputManager::getInstance().setKeyFocusWidget(command);
+        MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
     }
 
-    void Console::disable()
+    void Console::close()
     {
-        setVisible(false);
-        setSelectedObject(MWWorld::Ptr());
-        // Remove keyboard focus from the console input whenever the
-        // console is turned off
-        MyGUI::InputManager::getInstance().setKeyFocusWidget(NULL);
+        // Apparently, hidden widgets can retain key focus
+        MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(NULL);
     }
 
     void Console::setFont(const std::string &fntName)
     {
-        history->setFontName(fntName);
-        command->setFontName(fntName);
+        mHistory->setFontName(fntName);
+        mCommandLine->setFontName(fntName);
     }
 
     void Console::clearHistory()
     {
-        history->setCaption("");
+        mHistory->setCaption("");
     }
 
     void Console::print(const std::string &msg)
     {
-        history->addText(msg);
+        mHistory->addText(msg);
     }
 
     void Console::printOK(const std::string &msg)
@@ -217,7 +207,7 @@ namespace MWGui
         }
     }
 
-    void Console::keyPress(MyGUI::WidgetPtr _sender,
+    void Console::keyPress(MyGUI::Widget* _sender,
                   MyGUI::KeyCode key,
                   MyGUI::Char _char)
     {
@@ -225,10 +215,10 @@ namespace MWGui
         {
             std::vector<std::string> matches;
             listNames();
-            command->setCaption(complete( command->getCaption(), matches ));
+            mCommandLine->setCaption(complete( mCommandLine->getOnlyText(), matches ));
 #if 0
             int i = 0;
-            for(std::vector<std::string>::iterator it=matches.begin(); it < matches.end(); it++,i++ )
+            for(std::vector<std::string>::iterator it=matches.begin(); it < matches.end(); ++it,++i )
             {
                 printOK( *it );
                 if( i == 50 )
@@ -237,64 +227,63 @@ namespace MWGui
 #endif
         }
 
-        if(command_history.empty()) return;
+        if(mCommandHistory.empty()) return;
 
         // Traverse history with up and down arrows
         if(key == MyGUI::KeyCode::ArrowUp)
         {
             // If the user was editing a string, store it for later
-            if(current == command_history.end())
-                editString = command->getCaption();
+            if(mCurrent == mCommandHistory.end())
+                mEditString = mCommandLine->getOnlyText();
 
-            if(current != command_history.begin())
+            if(mCurrent != mCommandHistory.begin())
             {
-                current--;
-                command->setCaption(*current);
+                --mCurrent;
+                mCommandLine->setCaption(*mCurrent);
             }
         }
         else if(key == MyGUI::KeyCode::ArrowDown)
         {
-            if(current != command_history.end())
+            if(mCurrent != mCommandHistory.end())
             {
-                current++;
+                ++mCurrent;
 
-                if(current != command_history.end())
-                    command->setCaption(*current);
+                if(mCurrent != mCommandHistory.end())
+                    mCommandLine->setCaption(*mCurrent);
                 else
                     // Restore the edit string
-                    command->setCaption(editString);
+                    mCommandLine->setCaption(mEditString);
             }
         }
     }
 
-    void Console::acceptCommand(MyGUI::EditPtr _sender)
+    void Console::acceptCommand(MyGUI::EditBox* _sender)
     {
-        const std::string &cm = command->getCaption();
+        const std::string &cm = mCommandLine->getOnlyText();
         if(cm.empty()) return;
 
         // Add the command to the history, and set the current pointer to
         // the end of the list
-        command_history.push_back(cm);
-        current = command_history.end();
-        editString.clear();
+        mCommandHistory.push_back(cm);
+        mCurrent = mCommandHistory.end();
+        mEditString.clear();
 
         execute (cm);
 
-        command->setCaption("");
+        mCommandLine->setCaption("");
     }
 
     std::string Console::complete( std::string input, std::vector<std::string> &matches )
     {
-        using namespace std;
-        string output=input;
-        string tmp=input;
+        std::string output = input;
+        std::string tmp = input;
         bool has_front_quote = false;
 
         /* Does the input string contain things that don't have to be completed? If yes erase them. */
         /* Are there quotation marks? */
-        if( tmp.find('"') != string::npos ) {
+        if( tmp.find('"') != std::string::npos ) {
             int numquotes=0;
-            for(string::iterator it=tmp.begin(); it < tmp.end(); ++it) {
+            for(std::string::iterator it=tmp.begin(); it < tmp.end(); ++it) {
                 if( *it == '"' )
                     numquotes++;
             }
@@ -306,7 +295,7 @@ namespace MWGui
             }
             else {
                 size_t pos;
-                if( ( ((pos = tmp.rfind(' ')) != string::npos ) ) && ( pos > tmp.rfind('"') ) ) {
+                if( ( ((pos = tmp.rfind(' ')) != std::string::npos ) ) && ( pos > tmp.rfind('"') ) ) {
                     tmp.erase( 0, tmp.rfind(' ')+1);
                 }
                 else {
@@ -318,7 +307,7 @@ namespace MWGui
         /* No quotation marks. Are there spaces?*/
         else {
             size_t rpos;
-            if( (rpos=tmp.rfind(' ')) != string::npos ) {
+            if( (rpos=tmp.rfind(' ')) != std::string::npos ) {
                 if( rpos == 0 ) {
                     tmp.clear();
                 }
@@ -337,7 +326,7 @@ namespace MWGui
         }
 
         /* Iterate through the vector. */
-        for(vector<string>::iterator it=mNames.begin(); it < mNames.end();++it) {
+        for(std::vector<std::string>::iterator it=mNames.begin(); it < mNames.end();++it) {
             bool string_different=false;
 
             /* Is the string shorter than the input string? If yes skip it. */
@@ -345,7 +334,7 @@ namespace MWGui
                 continue;
 
             /* Is the beginning of the string different from the input string? If yes skip it. */
-            for( string::iterator iter=tmp.begin(), iter2=(*it).begin(); iter < tmp.end();iter++, iter2++) {
+            for( std::string::iterator iter=tmp.begin(), iter2=(*it).begin(); iter < tmp.end();++iter, ++iter2) {
                 if( tolower(*iter) != tolower(*iter2) ) {
                     string_different=true;
                     break;
@@ -368,24 +357,24 @@ namespace MWGui
         /* Only one match. We're done. */
         if( matches.size() == 1 ) {
             /* Adding quotation marks when the input string started with a quotation mark or has spaces in it*/
-            if( ( matches.front().find(' ') != string::npos )  ) {
+            if( ( matches.front().find(' ') != std::string::npos )  ) {
                 if( !has_front_quote )
-                    output.append(string("\""));
-                return output.append(matches.front() + string("\" "));
+                    output.append(std::string("\""));
+                return output.append(matches.front() + std::string("\" "));
             }
             else if( has_front_quote ) {
-                return  output.append(matches.front() + string("\" "));
+                return  output.append(matches.front() + std::string("\" "));
             }
             else {
-                return output.append(matches.front() + string(" "));
+                return output.append(matches.front() + std::string(" "));
             }
         }
 
         /* Check if all matching strings match further than input. If yes complete to this match. */
         int i = tmp.length();
 
-        for(string::iterator iter=matches.front().begin()+tmp.length(); iter < matches.front().end(); iter++, i++) {
-            for(vector<string>::iterator it=matches.begin(); it < matches.end();++it) {
+        for(std::string::iterator iter=matches.front().begin()+tmp.length(); iter < matches.front().end(); ++iter, ++i) {
+            for(std::vector<std::string>::iterator it=matches.begin(); it < matches.end();++it) {
                 if( tolower((*it)[i]) != tolower(*iter) ) {
                     /* Append the longest match to the end of the output string*/
                     output.append(matches.front().substr( 0, i));
@@ -405,12 +394,26 @@ namespace MWGui
 
     void Console::setSelectedObject(const MWWorld::Ptr& object)
     {
-        mPtr = object;
-        if (!mPtr.isEmpty())
-            setTitle("#{sConsoleTitle} (" + mPtr.getCellRef().refID + ")");
+        if (!object.isEmpty())
+        {
+            if (object == mPtr)
+            {
+                setTitle("#{sConsoleTitle}");
+                mPtr=MWWorld::Ptr();
+            }
+            else
+            {
+                setTitle("#{sConsoleTitle} (" + object.getCellRef().mRefID + ")");
+                mPtr = object;
+            }
+            // User clicked on an object. Restore focus to the console command line.
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
+        }
         else
+        {
             setTitle("#{sConsoleTitle}");
-        MyGUI::InputManager::getInstance().setKeyFocusWidget(command);
+            mPtr = MWWorld::Ptr();
+        }
     }
 
     void Console::onReferenceUnavailable()

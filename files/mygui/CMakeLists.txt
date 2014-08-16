@@ -4,15 +4,10 @@ set(SDIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(DDIR ${OpenMW_BINARY_DIR}/resources/mygui)
 
 set(MYGUI_FILES
-    atlas1.cfg
-    mainmenu.cfg
     bigbars.png
     black.png
     core.skin
     core.xml
-    EBGaramond-Regular.ttf
-    mwgui.png
-    Obliviontt.zip
     openmw_alchemy_window.layout
     openmw_book.layout
     openmw_box.skin.xml
@@ -73,9 +68,23 @@ set(MYGUI_FILES
     openmw_spell_buying_window.layout
     openmw_loading_screen.layout
     openmw_levelup_dialog.layout
+    openmw_wait_dialog.layout
+    openmw_wait_dialog_progressbar.layout
+    openmw_spellcreation_dialog.layout
+    openmw_edit_effect.layout
+    openmw_enchanting_dialog.layout
+    openmw_trainingwindow.layout
+    openmw_travel_window.layout
+    openmw_persuasion_dialog.layout
+    openmw_merchantrepair.layout
+    openmw_repair.layout
+    openmw_companion_window.layout
+    openmw_savegame_dialog.layout
+    openmw_recharge_dialog.layout
     smallbars.png
-    VeraMono.ttf
+    DejaVuLGCSansMono.ttf
     markers.png
+    ../launcher/images/openmw.png
 )
 
 
